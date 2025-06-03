@@ -51,6 +51,40 @@ private:
     }
   }
 
+  // Function to parse date/time string and extract hour/minute/AM-PM
+  void parseDateTime(String dateTimeStr, int &hour, int &minute, int &ampm)
+  {
+    // Format: "3/6/2025 05:45:34 PM"
+    // Find the space before the time
+    int spaceIndex = dateTimeStr.indexOf(' ');
+    if (spaceIndex == -1) return;
+    
+    // Extract time portion: "05:45:34 PM"
+    String timeStr = dateTimeStr.substring(spaceIndex + 1);
+    
+    // Find AM/PM
+    ampm = 0; // Default to AM
+    if (timeStr.indexOf("PM") != -1) {
+      ampm = 1;
+    }
+    
+    // Extract hour and minute
+    int firstColon = timeStr.indexOf(':');
+    int secondColon = timeStr.indexOf(':', firstColon + 1);
+    
+    if (firstColon != -1 && secondColon != -1) {
+      hour = timeStr.substring(0, firstColon).toInt();
+      minute = timeStr.substring(firstColon + 1, secondColon).toInt();
+      
+      // Convert 24-hour to 12-hour format if needed
+      if (hour == 0) {
+        hour = 12; // Midnight becomes 12 AM
+      } else if (hour > 12) {
+        hour = hour - 12; // Convert PM hours
+      }
+    }
+  }
+
 public:
   /*
     CUSTOM PROTOCOL CLASS
@@ -86,77 +120,45 @@ public:
   // Called when new data is coming from computer
   void read()
   {
-    /* int coolantTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);
-      int carSpeed = FlowSerialReadStringUntil(',').toInt();
-      int rpms = FlowSerialReadStringUntil(',').toInt();
-      int fuelPercent = FlowSerialReadStringUntil(',').toInt();
-      int oilTemp = FlowSerialReadStringUntil('\n').toInt();
-    */
-    Serial.print("Reading data: ");
-    Serial.println(FlowSerialReadStringUntil('\n')); // Debugging line to see incoming data
-
-    int coolantTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72); // 1
-    int carSpeed = FlowSerialReadStringUntil(',').toInt();                 // 2
-    int rpms = FlowSerialReadStringUntil(',').toInt();                     // 3
-    int fuelPercent = FlowSerialReadStringUntil(',').toInt();              // 4
-    int oilTemp = FlowSerialReadStringUntil(',').toInt();                  // 5
-    String gear = FlowSerialReadStringUntil(',');                          // 6
-    int currentLeftTurn = FlowSerialReadStringUntil(',').toInt();          // 7
-    int currentRightTurn = FlowSerialReadStringUntil(',').toInt();         // 8
-    int hour = FlowSerialReadStringUntil(',').toInt();                     // 9
-    int minute = FlowSerialReadStringUntil(',').toInt();                   // 10
-    int mileage = FlowSerialReadStringUntil(',').toInt();                  // 11
-    int ding = FlowSerialReadStringUntil(',').toInt();                     // 12
-    int totalBrightness = FlowSerialReadStringUntil(',').toInt();          // 13
-    int highbeam = FlowSerialReadStringUntil(',').toInt();                 // 14
-    int fog = FlowSerialReadStringUntil(',').toInt();                      // 15
-    int brake = FlowSerialReadStringUntil('\n').toInt();                   // 16
-
-    // int timeValue = VolvoDIM.clockToDecimal(hour,minute,1); //This converts a 12 hour time into a number suitable for setting the clock
-    // The format for the function above is hour, minute, am = 0, pm = 1
-    // VolvoDIM.setTime(timeValue); //This sets the time on the dim
-    /*VolvoDIM.setOutdoorTemp(oilTemp); //This accepts a temperature in fahrenheit -49 - 176 and sets it
-      VolvoDIM.setCoolantTemp(coolantTemp); //This sets the coolant gauge 0 - 100
-      VolvoDIM.setSpeed(carSpeed); //This sets the spedometer in mph 0-160
-      VolvoDIM.setGasLevel(fuelPercent); //This sets the gas guage 0 - 100
-      VolvoDIM.setRpm(rpms); //This sets the tachometer 0 - 8000
-      VolvoDIM.setTotalBrightness(256); //This sets both of the above brightness's 0 - 256*/
-    int timeValue = VolvoDIM.clockToDecimal(hour, minute, 1);
-
-    // Handle left blinker
-    handleBlinker(currentLeftTurn, leftBlinkerState, lastBlinkMillisLeft, LeftTurn, previousMillisLeft, &VolvoDIM::setLeftBlinkerSolid);
-
-    // Handle right blinker
-    handleBlinker(currentRightTurn, rightBlinkerState, lastBlinkMillisRight, RightTurn, previousMillisRight, &VolvoDIM::setRightBlinkerSolid);
-
-    // Update other gauges
+    // Protocol format:
+    // [WaterTemperature],[SpeedMph],[Rpms],[Fuel_Percent],[OilTemperature],[Gear],[CurrentDateTime],[SessionOdo],[GameVolume],[RPMShiftLight1],[Brake],[OpponentsCount]
+    
+    int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);    // 1 - WaterTemperature (converted for coolant)
+    int carSpeed = FlowSerialReadStringUntil(',').toInt();                  // 2 - SpeedMph
+    int rpms = FlowSerialReadStringUntil(',').toInt();                      // 3 - Rpms
+    int fuelPercent = FlowSerialReadStringUntil(',').toInt();               // 4 - Fuel_Percent
+    int oilTemp = FlowSerialReadStringUntil(',').toInt();                   // 5 - OilTemperature
+    String gear = FlowSerialReadStringUntil(',');                           // 6 - Gear
+    String currentDateTime = FlowSerialReadStringUntil(',');                // 7 - CurrentDateTime (format: "3/6/2025 05:45:34 PM")
+    int sessionOdo = FlowSerialReadStringUntil(',').toInt();                // 8 - SessionOdo
+    int gameVolume = FlowSerialReadStringUntil(',').toInt();                // 9 - GameVolume
+    int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();             // 10 - RPMShiftLight1
+    int brake = FlowSerialReadStringUntil(',').toInt();                     // 11 - Brake
+    int opponentsCount = FlowSerialReadStringUntil(',').toInt();           // 12 - OpponentsCount
+    int right = FlowSerialReadStringUntil(',').toInt(); 
+    int left = FlowSerialReadStringUntil('\n').toInt(); // 13 - RightTurn, 14 - LeftTurn
+    // Parse date/time and set clock
+    int hour = 12, minute = 0, ampm = 0;
+    parseDateTime(currentDateTime, hour, minute, ampm);
+    int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
     VolvoDIM.setTime(timeValue);
-    VolvoDIM.setOutdoorTemp(oilTemp);
-    VolvoDIM.setCoolantTemp(coolantTemp);
-    VolvoDIM.setSpeed(carSpeed);
-    VolvoDIM.setGasLevel(fuelPercent);
-    VolvoDIM.setRpm(rpms);
-    VolvoDIM.setGearPosText(gear.charAt(0));
-    VolvoDIM.enableMilageTracking(mileage);
-    VolvoDIM.enableDisableDingNoise(ding);
-    // VolvoDIM.enableHighBeam(highbeam);
-    VolvoDIM.setTotalBrightness(totalBrightness);
-    // VolvoDIM.enableFog(fog);
+
+    // Update VolvoDIM gauges
+    VolvoDIM.setOutdoorTemp(oilTemp);           // Set oil temperature as outdoor temp
+    VolvoDIM.setCoolantTemp(waterTemp);         // Set water/coolant temperature
+    VolvoDIM.setSpeed(carSpeed);                // Set speedometer in mph
+    VolvoDIM.setGasLevel(fuelPercent);          // Set fuel gauge 0-100
+    VolvoDIM.setRpm(rpms);                      // Set tachometer
+    VolvoDIM.setGearPosText(gear.charAt(0));    // Set gear position
+    VolvoDIM.enableMilageTracking(sessionOdo);  // Set odometer
+    VolvoDIM.enableDisableDingNoise(gameVolume > 0 ? 1 : 0); // Enable ding based on game volume
+    
+    // Set brightness based on shift light (you can adjust this logic)
+    int brightness = map(rpmShiftLight, 0, 8000, 50, 256);
+    VolvoDIM.setTotalBrightness(brightness);
+    
+    // You can use brake and opponentsCount for additional features if needed
     // VolvoDIM.enableBrake(brake);
-
-    /*
-      // -------------------------------------------------------
-      // EXAMPLE 2 - reads speed and gear from the message
-      // Protocol formula must be set in simhub to
-      // format([DataCorePlugin.GameData.NewData.SpeedKmh],'0') + ';' + isnull([DataCorePlugin.GameData.NewData.Gear],'N')
-      // -------------------------------------------------------
-
-      int speed = FlowSerialReadStringUntil(';').toInt();
-      String gear = FlowSerialReadStringUntil('\n');
-
-      FlowSerialDebugPrintLn("Speed : " + String(speed));
-      FlowSerialDebugPrintLn("Gear : " + gear);
-    */
   }
 
   // Called once per arduino loop, timing can't be predicted,
