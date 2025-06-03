@@ -14,8 +14,6 @@ private:
   bool rightBlinkerState = false;
   unsigned long lastBlinkMillisLeft = 0;
   unsigned long lastBlinkMillisRight = 0;
-  unsigned long previousMillisLeft = 0;
-  unsigned long previousMillisRight = 0;
   const unsigned long blinkInterval = 500; // Blink interval in milliseconds
   int previousLeftTurn = 0;
   int previousRightTurn = 0;
@@ -54,32 +52,21 @@ private:
     }
   }
 
-  // Handle blinker logic with timing
-  void handleBlinker(int currentTurn, bool &blinkerState, unsigned long &lastBlinkMillis, int &previousTurn, unsigned long &previousMillis, void (VolvoDIM::*setBlinker)(int))
+  // Simplified blinker handling - let the VolvoDIM library handle the timing
+  void handleBlinker(int leftTurnState, int rightTurnState)
   {
-    unsigned long currentMillis = millis();
-
-    if (currentTurn != previousTurn)
-    {
-      previousMillis = currentMillis;
-      previousTurn = currentTurn;
-      blinkerState = (currentTurn == 1);
-      lastBlinkMillis = currentMillis;
+    // Handle left blinker
+    if (leftTurnState == 1) {
+      VolvoDIM.setLeftBlinker(1);
+    } else {
+      VolvoDIM.setLeftBlinker(0);
     }
 
-    if (currentTurn == 1)
-    {
-      if (currentMillis - lastBlinkMillis >= blinkInterval)
-      {
-        blinkerState = !blinkerState;
-        (VolvoDIM.*setBlinker)(blinkerState ? 1 : 0);
-        lastBlinkMillis = currentMillis;
-      }
-    }
-    else
-    {
-      blinkerState = false;
-      (VolvoDIM.*setBlinker)(0);
+    // Handle right blinker
+    if (rightTurnState == 1) {
+      VolvoDIM.setRightBlinker(1);
+    } else {
+      VolvoDIM.setRightBlinker(0);
     }
   }
 
@@ -142,9 +129,8 @@ public:
     int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
     VolvoDIM.setTime(timeValue);
 
-    // Handle blinkers with timing
-    handleBlinker(leftTurn, leftBlinkerState, lastBlinkMillisLeft, previousLeftTurn, previousMillisLeft, &VolvoDIM::setLeftBlinker);
-    handleBlinker(rightTurn, rightBlinkerState, lastBlinkMillisRight, previousRightTurn, previousMillisRight, &VolvoDIM::setRightBlinker);
+    // Handle blinkers - simplified approach
+    handleBlinker(leftTurn, rightTurn);
 
     // Update VolvoDIM gauges
     VolvoDIM.setOutdoorTemp(oilTemp);           // Set oil temperature as outdoor temp
