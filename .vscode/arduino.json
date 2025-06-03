@@ -1,0 +1,4 @@
+{
+    "board": "arduino:avr:uno",
+    "sketch": "DisplayClientV2\\DisplayClientV2.ino"
+}

@@ -1,5 +1,5 @@
 /*
- * Ring Buffer Library for Arduino
+ * Ring Buffer Library for Arduino usage
  *
  * Copyright Jean-Luc Béchennec 2018
  *
