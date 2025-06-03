@@ -5,51 +5,20 @@
 #include <VolvoDIM.h>
 
 VolvoDIM VolvoDIM(9, 6);
-int totalBlink = 0, innerLeftBlink = 0, innerRightBlink = 0;
+
 class SHCustomProtocol
 {
 private:
+  bool engineOn = false; // Variable to track engine state
   bool leftBlinkerState = false;
   bool rightBlinkerState = false;
   unsigned long lastBlinkMillisLeft = 0;
   unsigned long lastBlinkMillisRight = 0;
-  int LeftTurn = 0;
-  int RightTurn = 0;
   unsigned long previousMillisLeft = 0;
   unsigned long previousMillisRight = 0;
   const unsigned long blinkInterval = 500; // Blink interval in milliseconds
   int previousLeftTurn = 0;
   int previousRightTurn = 0;
-
-  bool engineOn = false; // New variable to track engine state
-
-  void handleBlinker(int currentTurn, bool &blinkerState, unsigned long &lastBlinkMillis, int &previousTurn, unsigned long &previousMillis, void (VolvoDIM::*setBlinker)(int))
-  {
-    unsigned long currentMillis = millis();
-
-    if (currentTurn != previousTurn)
-    {
-      previousMillis = currentMillis;
-      previousTurn = currentTurn;
-      blinkerState = (currentTurn == 1);
-      lastBlinkMillis = currentMillis;
-    }
-
-    if (currentTurn == 1)
-    {
-      if (currentMillis - lastBlinkMillis >= blinkInterval)
-      {
-        blinkerState = !blinkerState;
-        (VolvoDIM.*setBlinker)(blinkerState ? 1 : 0);
-        lastBlinkMillis = currentMillis;
-      }
-    }
-    else
-    {
-      blinkerState = false;
-      (VolvoDIM.*setBlinker)(0);
-    }
-  }
 
   // Function to parse date/time string and extract hour/minute/AM-PM
   void parseDateTime(String dateTimeStr, int &hour, int &minute, int &ampm)
@@ -82,6 +51,35 @@ private:
       } else if (hour > 12) {
         hour = hour - 12; // Convert PM hours
       }
+    }
+  }
+
+  // Handle blinker logic with timing
+  void handleBlinker(int currentTurn, bool &blinkerState, unsigned long &lastBlinkMillis, int &previousTurn, unsigned long &previousMillis, void (VolvoDIM::*setBlinker)(int))
+  {
+    unsigned long currentMillis = millis();
+
+    if (currentTurn != previousTurn)
+    {
+      previousMillis = currentMillis;
+      previousTurn = currentTurn;
+      blinkerState = (currentTurn == 1);
+      lastBlinkMillis = currentMillis;
+    }
+
+    if (currentTurn == 1)
+    {
+      if (currentMillis - lastBlinkMillis >= blinkInterval)
+      {
+        blinkerState = !blinkerState;
+        (VolvoDIM.*setBlinker)(blinkerState ? 1 : 0);
+        lastBlinkMillis = currentMillis;
+      }
+    }
+    else
+    {
+      blinkerState = false;
+      (VolvoDIM.*setBlinker)(0);
     }
   }
 
@@ -121,7 +119,7 @@ public:
   void read()
   {
     // Protocol format:
-    // [WaterTemperature],[SpeedMph],[Rpms],[Fuel_Percent],[OilTemperature],[Gear],[CurrentDateTime],[SessionOdo],[GameVolume],[RPMShiftLight1],[Brake],[OpponentsCount]
+    // [WaterTemperature],[SpeedMph],[Rpms],[Fuel_Percent],[OilTemperature],[Gear],[CurrentDateTime],[SessionOdo],[GameVolume],[RPMShiftLight1],[Brake],[OpponentsCount],[TurnIndicatorRight],[TurnIndicatorLeft]
     
     int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);    // 1 - WaterTemperature (converted for coolant)
     int carSpeed = FlowSerialReadStringUntil(',').toInt();                  // 2 - SpeedMph
@@ -134,14 +132,19 @@ public:
     int gameVolume = FlowSerialReadStringUntil(',').toInt();                // 9 - GameVolume
     int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();             // 10 - RPMShiftLight1
     int brake = FlowSerialReadStringUntil(',').toInt();                     // 11 - Brake
-    int opponentsCount = FlowSerialReadStringUntil(',').toInt();           // 12 - OpponentsCount
-    int right = FlowSerialReadStringUntil(',').toInt(); 
-    int left = FlowSerialReadStringUntil('\n').toInt(); // 13 - RightTurn, 14 - LeftTurn
+    int opponentsCount = FlowSerialReadStringUntil(',').toInt();            // 12 - OpponentsCount
+    int rightTurn = FlowSerialReadStringUntil(',').toInt();                 // 13 - TurnIndicatorRight
+    int leftTurn = FlowSerialReadStringUntil('\n').toInt();                 // 14 - TurnIndicatorLeft
+
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
     parseDateTime(currentDateTime, hour, minute, ampm);
     int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
     VolvoDIM.setTime(timeValue);
+
+    // Handle blinkers with timing
+    handleBlinker(leftTurn, leftBlinkerState, lastBlinkMillisLeft, previousLeftTurn, previousMillisLeft, &VolvoDIM::setLeftBlinker);
+    handleBlinker(rightTurn, rightBlinkerState, lastBlinkMillisRight, previousRightTurn, previousMillisRight, &VolvoDIM::setRightBlinker);
 
     // Update VolvoDIM gauges
     VolvoDIM.setOutdoorTemp(oilTemp);           // Set oil temperature as outdoor temp
