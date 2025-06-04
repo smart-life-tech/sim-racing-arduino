@@ -100,7 +100,7 @@ private:
   }
 
   // Send custom CAN message
-  void sendCustomCANMessage(unsigned long canId, unsigned char* data, int dataLength = 8)
+  void sendCustomCANMessage(unsigned long canId, unsigned char *data, int dataLength = 8)
   {
     CAN.sendMsgBuf(canId, 1, dataLength, data);
   }
@@ -113,11 +113,11 @@ private:
       return; // Don't update if disabled or value hasn't changed
     }
 
-    lastOdometerValue = mileage;
+    lastOdometerValue = mileage * 1000;
 
     // Example: Send odometer value to a specific CAN ID
     // You'll need to adjust the CAN ID and data format based on your DIM requirements
-    unsigned long odometerCanId = 0x3C01428; // Example CAN ID - adjust as needed
+    unsigned long odometerCanId = 0x1A6; // Example CAN ID - adjust as needed
     unsigned char odometerData[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
     // Pack mileage into CAN data bytes
@@ -125,8 +125,8 @@ private:
     odometerData[0] = (mileage >> 24) & 0xFF; // Most significant byte
     odometerData[1] = (mileage >> 16) & 0xFF;
     odometerData[2] = (mileage >> 8) & 0xFF;
-    odometerData[3] = mileage & 0xFF;         // Least significant byte
-    odometerData[4] = 0x00; // Additional data if needed
+    odometerData[3] = mileage & 0xFF; // Least significant byte
+    odometerData[4] = 0x00;           // Additional data if needed
     odometerData[5] = 0x00;
     odometerData[6] = 0x00;
     odometerData[7] = 0x00;
@@ -210,21 +210,21 @@ public:
     // Protocol format:
     // [WaterTemperature],[SpeedMph],[Rpms],[Fuel_Percent],[OilTemperature],[Gear],[CurrentDateTime],[SessionOdo],[GameVolume],[RPMShiftLight1],[Brake],[OpponentsCount],[TurnIndicatorRight],[TurnIndicatorLeft],[TotalOdometer]
 
-    int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72); // 1 - WaterTemperature (converted for coolant)
-    int carSpeed = FlowSerialReadStringUntil(',').toInt();               // 2 - SpeedMph
-    int rpms = FlowSerialReadStringUntil(',').toInt();                   // 3 - Rpms
-    int fuelPercent = FlowSerialReadStringUntil(',').toInt();            // 4 - Fuel_Percent
-    int oilTemp = FlowSerialReadStringUntil(',').toInt();                // 5 - OilTemperature
-    String gear = FlowSerialReadStringUntil(',');                        // 6 - Gear
-    String currentDateTime = FlowSerialReadStringUntil(',');             // 7 - CurrentDateTime (format: "3/6/2025 05:45:34 PM")
-    int sessionOdo = FlowSerialReadStringUntil(',').toInt();             // 8 - SessionOdo
-    int gameVolume = FlowSerialReadStringUntil(',').toInt();             // 9 - GameVolume
-    int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();          // 10 - RPMShiftLight1
-    int brake = FlowSerialReadStringUntil(',').toInt();                  // 11 - Brake
-    int opponentsCount = FlowSerialReadStringUntil(',').toInt();         // 12 - OpponentsCount
-    int rightTurn = FlowSerialReadStringUntil(',').toInt();              // 13 - TurnIndicatorRight
-    int leftTurn = FlowSerialReadStringUntil(',').toInt();               // 14 - TurnIndicatorLeft
-    unsigned long totalOdometer = FlowSerialReadStringUntil('\n').toInt();  // 15 - TotalOdometer
+    int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);   // 1 - WaterTemperature (converted for coolant)
+    int carSpeed = FlowSerialReadStringUntil(',').toInt();                 // 2 - SpeedMph
+    int rpms = FlowSerialReadStringUntil(',').toInt();                     // 3 - Rpms
+    int fuelPercent = FlowSerialReadStringUntil(',').toInt();              // 4 - Fuel_Percent
+    int oilTemp = FlowSerialReadStringUntil(',').toInt();                  // 5 - OilTemperature
+    String gear = FlowSerialReadStringUntil(',');                          // 6 - Gear
+    String currentDateTime = FlowSerialReadStringUntil(',');               // 7 - CurrentDateTime (format: "3/6/2025 05:45:34 PM")
+    int sessionOdo = FlowSerialReadStringUntil(',').toInt();               // 8 - SessionOdo
+    int gameVolume = FlowSerialReadStringUntil(',').toInt();               // 9 - GameVolume
+    int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();            // 10 - RPMShiftLight1
+    int brake = FlowSerialReadStringUntil(',').toInt();                    // 11 - Brake
+    int opponentsCount = FlowSerialReadStringUntil(',').toInt();           // 12 - OpponentsCount
+    int rightTurn = FlowSerialReadStringUntil(',').toInt();                // 13 - TurnIndicatorRight
+    int leftTurn = FlowSerialReadStringUntil('\n').toInt();                 // 14 - TurnIndicatorLeft
+    unsigned long totalOdometer = FlowSerialReadStringUntil('\n').toInt(); // 15 - TotalOdometer
 
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
@@ -245,8 +245,8 @@ public:
     VolvoDIM.setGearPosText(gear.charAt(0)); // Set gear position
 
     // Set custom odometer display using direct CAN message
-    setOdometer(totalOdometer);                 // Display total odometer mileage via custom CAN
-    
+    //setOdometer(totalOdometer); // Display total odometer mileage via custom CAN
+
     // Alternative: Use text display for odometer
     // setOdometerAsText(totalOdometer);        // Display as text in message area
 
