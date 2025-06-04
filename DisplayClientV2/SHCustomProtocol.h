@@ -3,8 +3,14 @@
 
 #include <Arduino.h>
 #include <VolvoDIM.h>
+#include <mcp2515_can.h>
+#include <mcp_can.h>
+#include <SPI.h>
 
 VolvoDIM VolvoDIM(9, 6);
+
+// External CAN object from VolvoDIM library
+extern mcp2515_can CAN;
 
 class SHCustomProtocol
 {
@@ -93,7 +99,13 @@ private:
     }
   }
 
-  // Custom odometer display function
+  // Send custom CAN message
+  void sendCustomCANMessage(unsigned long canId, unsigned char* data, int dataLength = 8)
+  {
+    CAN.sendMsgBuf(canId, 1, dataLength, data);
+  }
+
+  // Custom odometer display function using direct CAN messages
   void setOdometer(unsigned long mileage)
   {
     if (!odometerEnabled || mileage == lastOdometerValue)
@@ -103,19 +115,48 @@ private:
 
     lastOdometerValue = mileage;
 
-    // Convert mileage to string for display
-    String mileageStr = String(mileage);
+    // Example: Send odometer value to a specific CAN ID
+    // You'll need to adjust the CAN ID and data format based on your DIM requirements
+    unsigned long odometerCanId = 0x3C01428; // Example CAN ID - adjust as needed
+    unsigned char odometerData[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
-    // Pad with spaces if needed (max display is usually around 6-7 digits)
+    // Pack mileage into CAN data bytes
+    // This is an example - you'll need to adjust based on your DIM's expected format
+    odometerData[0] = (mileage >> 24) & 0xFF; // Most significant byte
+    odometerData[1] = (mileage >> 16) & 0xFF;
+    odometerData[2] = (mileage >> 8) & 0xFF;
+    odometerData[3] = mileage & 0xFF;         // Least significant byte
+    odometerData[4] = 0x00; // Additional data if needed
+    odometerData[5] = 0x00;
+    odometerData[6] = 0x00;
+    odometerData[7] = 0x00;
+
+    // Send the custom CAN message
+    sendCustomCANMessage(odometerCanId, odometerData);
+
+    // Optional: Add delay to prevent flooding
+    delay(10);
+  }
+
+  // Alternative method: Send odometer as text display
+  void setOdometerAsText(unsigned long mileage)
+  {
+    if (!odometerEnabled || mileage == lastOdometerValue)
+    {
+      return;
+    }
+
+    lastOdometerValue = mileage;
+
+    // Format mileage as string
+    String mileageStr = String(mileage);
     while (mileageStr.length() < 6)
     {
       mileageStr = " " + mileageStr;
     }
-
-    // Add "mi" or "miles" suffix if there's room
     mileageStr += " mi";
 
-    // Use the custom text function to display odometer
+    // Use VolvoDIM's custom text function
     VolvoDIM.setCustomText(mileageStr.c_str());
   }
 
@@ -126,7 +167,7 @@ private:
     if (!enable)
     {
       // Clear the display when disabled
-      VolvoDIM.setCustomText("");
+      lastOdometerValue = 0;
     }
   }
 
@@ -182,8 +223,8 @@ public:
     int brake = FlowSerialReadStringUntil(',').toInt();                  // 11 - Brake
     int opponentsCount = FlowSerialReadStringUntil(',').toInt();         // 12 - OpponentsCount
     int rightTurn = FlowSerialReadStringUntil(',').toInt();              // 13 - TurnIndicatorRight
-    int leftTurn = FlowSerialReadStringUntil('\n').toInt();              // 14 - TurnIndicatorLeft
-    unsigned long totalOdometer = sessionOdo;                            // FlowSerialReadStringUntil('\n').toInt();  // 15 - TotalOdometer
+    int leftTurn = FlowSerialReadStringUntil(',').toInt();               // 14 - TurnIndicatorLeft
+    unsigned long totalOdometer = FlowSerialReadStringUntil('\n').toInt();  // 15 - TotalOdometer
 
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
@@ -203,8 +244,11 @@ public:
     VolvoDIM.setRpm(rpms);                   // Set tachometer
     VolvoDIM.setGearPosText(gear.charAt(0)); // Set gear position
 
-    // Set custom odometer display
-    setOdometer(totalOdometer); // Display total odometer mileage
+    // Set custom odometer display using direct CAN message
+    setOdometer(totalOdometer);                 // Display total odometer mileage via custom CAN
+    
+    // Alternative: Use text display for odometer
+    // setOdometerAsText(totalOdometer);        // Display as text in message area
 
     // Use session odometer for mileage tracking (if needed for other purposes)
     VolvoDIM.enableMilageTracking(sessionOdo > 0 ? 1 : 0);
