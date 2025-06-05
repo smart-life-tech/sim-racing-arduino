@@ -117,20 +117,21 @@ private:
 
     // Example: Send odometer value to a specific CAN ID
     // You'll need to adjust the CAN ID and data format based on your DIM requirements
-    unsigned long odometerCanId = 0x1A6; // Example CAN ID - adjust as needed
-    unsigned char odometerData[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    // Use the Speed/KeepAlive CAN ID from VolvoDIM library
+    unsigned long odometerCanId = 0x217FFC; // Speed/KeepAlive message from VolvoDIM
+    unsigned char odometerData[8] = {0x01, 0xEB, 0x00, 0xD8, 0xF0, 0x58, 0x00, 0x00};
 
     // Pack mileage into CAN data bytes
     // This is an example - you'll need to adjust based on your DIM's expected format
-    odometerData[0] = (mileage >> 24) & 0xFF; // Most significant byte
-    odometerData[1] = (mileage >> 16) & 0xFF;
-    odometerData[2] = (mileage >> 8) & 0xFF;
-    odometerData[3] = mileage & 0xFF; // Least significant byte
-    odometerData[4] = 0x00;           // Additional data if needed
-    odometerData[5] = 0x00;
-    odometerData[6] = 0x00;
-    odometerData[7] = 0x00;
-
+    // odometerData[0] = (mileage >> 24) & 0xFF; // Most significant byte
+    // odometerData[1] = (mileage >> 16) & 0xFF;
+    // odometerData[2] = (mileage >> 8) & 0xFF;
+    // odometerData[3] = mileage & 0xFF; // Least significant byte
+    // odometerData[4] = 0x00;           // Additional data if needed
+    // odometerData[5] = 0x00;
+    // odometerData[6] = 0x00;
+    // odometerData[7] = 0x00;
+    odometerData[7] = (mileage & 0xFF);
     // Send the custom CAN message
     sendCustomCANMessage(odometerCanId, odometerData);
 
@@ -210,21 +211,21 @@ public:
     // Protocol format:
     // [WaterTemperature],[SpeedMph],[Rpms],[Fuel_Percent],[OilTemperature],[Gear],[CurrentDateTime],[SessionOdo],[GameVolume],[RPMShiftLight1],[Brake],[OpponentsCount],[TurnIndicatorRight],[TurnIndicatorLeft],[TotalOdometer]
 
-    int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);   // 1 - WaterTemperature (converted for coolant)
-    int carSpeed = FlowSerialReadStringUntil(',').toInt();                 // 2 - SpeedMph
-    int rpms = FlowSerialReadStringUntil(',').toInt();                     // 3 - Rpms
-    int fuelPercent = FlowSerialReadStringUntil(',').toInt();              // 4 - Fuel_Percent
-    int oilTemp = FlowSerialReadStringUntil(',').toInt();                  // 5 - OilTemperature
-    String gear = FlowSerialReadStringUntil(',');                          // 6 - Gear
-    String currentDateTime = FlowSerialReadStringUntil(',');               // 7 - CurrentDateTime (format: "3/6/2025 05:45:34 PM")
-    int sessionOdo = FlowSerialReadStringUntil(',').toInt();               // 8 - SessionOdo
-    int gameVolume = FlowSerialReadStringUntil(',').toInt();               // 9 - GameVolume
-    int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();            // 10 - RPMShiftLight1
-    int brake = FlowSerialReadStringUntil(',').toInt();                    // 11 - Brake
-    int opponentsCount = FlowSerialReadStringUntil(',').toInt();           // 12 - OpponentsCount
-    int rightTurn = FlowSerialReadStringUntil(',').toInt();                // 13 - TurnIndicatorRight
-    int leftTurn = FlowSerialReadStringUntil('\n').toInt();                 // 14 - TurnIndicatorLeft
-    unsigned long totalOdometer = FlowSerialReadStringUntil('\n').toInt(); // 15 - TotalOdometer
+    int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72); // 1 - WaterTemperature (converted for coolant)
+    int carSpeed = FlowSerialReadStringUntil(',').toInt();               // 2 - SpeedMph
+    int rpms = FlowSerialReadStringUntil(',').toInt();                   // 3 - Rpms
+    int fuelPercent = FlowSerialReadStringUntil(',').toInt();            // 4 - Fuel_Percent
+    int oilTemp = FlowSerialReadStringUntil(',').toInt();                // 5 - OilTemperature
+    String gear = FlowSerialReadStringUntil(',');                        // 6 - Gear
+    String currentDateTime = FlowSerialReadStringUntil(',');             // 7 - CurrentDateTime (format: "3/6/2025 05:45:34 PM")
+    int sessionOdo = FlowSerialReadStringUntil(',').toInt();             // 8 - SessionOdo
+    int gameVolume = FlowSerialReadStringUntil(',').toInt();             // 9 - GameVolume
+    int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();          // 10 - RPMShiftLight1
+    int brake = FlowSerialReadStringUntil(',').toInt();                  // 11 - Brake
+    int opponentsCount = FlowSerialReadStringUntil(',').toInt();         // 12 - OpponentsCount
+    int rightTurn = FlowSerialReadStringUntil(',').toInt();              // 13 - TurnIndicatorRight
+    int leftTurn = FlowSerialReadStringUntil('\n').toInt();              // 14 - TurnIndicatorLeft
+    unsigned long totalOdometer = sessionOdo;                            // 15 - TotalOdometer
 
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
@@ -245,19 +246,22 @@ public:
     VolvoDIM.setGearPosText(gear.charAt(0)); // Set gear position
 
     // Set custom odometer display using direct CAN message
-    //setOdometer(totalOdometer); // Display total odometer mileage via custom CAN
+    setOdometer(totalOdometer); // Display total odometer mileage via custom CAN
 
     // Alternative: Use text display for odometer
     // setOdometerAsText(totalOdometer);        // Display as text in message area
 
     // Use session odometer for mileage tracking (if needed for other purposes)
-    VolvoDIM.enableMilageTracking(sessionOdo > 0 ? 1 : 0);
+    VolvoDIM.enableMilageTracking(sessionOdo > 0 ? 1 : 1);
 
     VolvoDIM.enableDisableDingNoise(gameVolume > 0 ? 0 : 0); // Enable ding based on game volume
 
     // Set brightness based on shift light (you can adjust this logic)
     int brightness = map(rpmShiftLight, 0, 8000, 50, 256);
-    VolvoDIM.setTotalBrightness(brightness);
+    VolvoDIM.setTotalBrightness(255);
+    VolvoDIM.setOverheadBrightness(255); // Set overhead brightness based on shift light
+    VolvoDIM.setLcdBrightness(255); // Set LCD brightness based on shift light
+   
     if (rightTurn == 1)
     {
       VolvoDIM.setRightBlinker(1); // Set right blinker on

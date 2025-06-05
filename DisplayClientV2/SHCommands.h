@@ -1,5 +1,5 @@
 #define MESSAGE_HEADER 0x03
-
+#define DEVICE_UNIQUE_ID "0000000000000000"
 void Command_Hello() {
 	FlowSerialTimedRead();
 	delay(10);
@@ -50,6 +50,14 @@ void Command_EncodersCount() {
 #endif
 }
 
+void uniqueId(){
+	FlowSerialPrint(DEVICE_UNIQUE_ID);
+	FlowSerialFlush();
+}
+void Command_shutdown(){
+	FlowSerialWrite(0x01);
+	FlowSerialFlush();
+}
 void Command_SpeedoData() {
 #ifdef INCLUDE_SPEEDOGAUGE
 	speedoTonePin.readFromString();
