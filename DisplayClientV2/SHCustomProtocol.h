@@ -29,7 +29,12 @@ private:
   // Odometer variables
   unsigned long lastOdometerValue = 0;
   bool odometerEnabled = false;
-
+  int rightTurns = 0;
+  int leftTurns = 0;
+  unsigned long previousMillis = 0;
+  long interval = 1000;
+  unsigned long counter = 0; // Counter for blinker state changes
+  bool blinkerEnabled = false;
   // Function to parse date/time string and extract hour/minute/AM-PM
   void parseDateTime(String dateTimeStr, int &hour, int &minute, int &ampm)
   {
@@ -98,7 +103,28 @@ private:
       (VolvoDIM.*setBlinker)(0);
     }
   }
-
+  bool enableBlinker(int state1, int state2)
+  {
+    counter++;
+    if (state1)
+      leftTurns = 1;
+    if (state2)
+      rightTurns = 1;
+    if (state1 || state2)
+      counter = 0;
+    if (counter > 5)
+    {
+      counter = 0;
+      blinkerEnabled = false; // Disable blinkers after 5 cycles of no input
+      leftTurns = 0;          // Clear left turn signal
+      rightTurns = 0;         // Clear right turn signal
+      blinkerEnabled = false; // Disable blinkers after 5 cycles of no input
+    }
+    else
+    {
+      blinkerEnabled = true;
+    }
+  }
   // Send custom CAN message
   void sendCustomCANMessage(unsigned long canId, unsigned char *data, int dataLength = 8)
   {
@@ -226,7 +252,7 @@ public:
     int rightTurn = FlowSerialReadStringUntil(',').toInt();              // 13 - TurnIndicatorRight
     int leftTurn = FlowSerialReadStringUntil('\n').toInt();              // 14 - TurnIndicatorLeft
     unsigned long totalOdometer = sessionOdo;                            // 15 - TotalOdometer
-
+    enableBlinker(rightTurn, leftTurn);
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
     parseDateTime(currentDateTime, hour, minute, ampm);
@@ -234,8 +260,8 @@ public:
     VolvoDIM.setTime(timeValue);
 
     // Handle blinkers with timing
-    handleBlinker(leftTurn, leftBlinkerState, lastBlinkMillisLeft, previousLeftTurn, previousMillisLeft, &VolvoDIM::setLeftBlinker);
-    handleBlinker(rightTurn, rightBlinkerState, lastBlinkMillisRight, previousRightTurn, previousMillisRight, &VolvoDIM::setRightBlinker);
+    // handleBlinker(leftTurn, leftBlinkerState, lastBlinkMillisLeft, previousLeftTurn, previousMillisLeft, &VolvoDIM::setLeftBlinker);
+    // handleBlinker(rightTurn, rightBlinkerState, lastBlinkMillisRight, previousRightTurn, previousMillisRight, &VolvoDIM::setRightBlinker);
 
     // Update VolvoDIM gauges
     VolvoDIM.setOutdoorTemp(oilTemp);        // Set oil temperature as outdoor temp
@@ -246,13 +272,20 @@ public:
     VolvoDIM.setGearPosText(gear.charAt(0)); // Set gear position
 
     // Set custom odometer display using direct CAN message
-    setOdometer(totalOdometer); // Display total odometer mileage via custom CAN
+    // setOdometer(totalOdometer); // Display total odometer mileage via custom CAN
 
     // Alternative: Use text display for odometer
     // setOdometerAsText(totalOdometer);        // Display as text in message area
 
     // Use session odometer for mileage tracking (if needed for other purposes)
-    VolvoDIM.enableMilageTracking(sessionOdo > 0 ? 1 : 1);
+    if (carSpeed > 5)
+    {
+      VolvoDIM.enableMilageTracking(sessionOdo > 0 ? 1 : 1);
+    }
+    else
+    {
+      VolvoDIM.enableMilageTracking(0); // Disable mileage tracking if speed is low
+    }
 
     VolvoDIM.enableDisableDingNoise(gameVolume > 0 ? 0 : 0); // Enable ding based on game volume
 
@@ -260,24 +293,9 @@ public:
     int brightness = map(rpmShiftLight, 0, 8000, 50, 256);
     VolvoDIM.setTotalBrightness(255);
     VolvoDIM.setOverheadBrightness(255); // Set overhead brightness based on shift light
-    VolvoDIM.setLcdBrightness(255); // Set LCD brightness based on shift light
-   
-    if (rightTurn == 1)
-    {
-      VolvoDIM.setRightBlinker(1); // Set right blinker on
-    }
-    else
-    {
-      VolvoDIM.setRightBlinker(0); // Set right blinker off
-    }
-    if (leftTurn == 1)
-    {
-      VolvoDIM.setLeftBlinker(1); // Set left blinker on
-    }
-    else
-    {
-      VolvoDIM.setLeftBlinker(0); // Set left blinker off
-    }
+    VolvoDIM.setLcdBrightness(255);      // Set LCD brightness based on shift light
+
+    // Set blinkers based on state
     // You can use brake and opponentsCount for additional features if needed
     // VolvoDIM.enableBrake(brake);
   }
@@ -287,8 +305,33 @@ public:
   void loop()
   {
     VolvoDIM.simulate();
+    unsigned long currentMillis = millis();
+    if ((currentMillis - previousMillis >= interval))
+    {
+      previousMillis = currentMillis;
+      if (rightTurns == 1 && leftTurns == 1)
+      {
+        // If both blinkers are on, turn them off
+        VolvoDIM.setRightBlinker(1); // Set right blinker off
+        VolvoDIM.setLeftBlinker(1);  // Set left blinker off
+      }
+      else if (rightTurns == 0 && leftTurns == 0)
+      {
+        VolvoDIM.setRightBlinker(0); // Set right blinker off
+        VolvoDIM.setLeftBlinker(0);  // Set left blinker off
+      }
+      else if (rightTurns == 1 && leftTurns == 0)
+      {
+        VolvoDIM.setRightBlinker(1); // Set right blinker off
+        VolvoDIM.setLeftBlinker(0);  // Set left blinker on
+      }
+      else if (leftTurns == 1 && rightTurns == 0)
+      {
+        VolvoDIM.setLeftBlinker(1);  // Set left blinker on
+        VolvoDIM.setRightBlinker(0); // Set right blinker off
+      }
+    }
   }
-
   // Called once between each byte read on arduino,
   // THIS IS A CRITICAL PATH :
   // AVOID ANY TIME CONSUMING ROUTINES !!!
