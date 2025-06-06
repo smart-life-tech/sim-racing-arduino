@@ -29,7 +29,12 @@ private:
   int rightConsecutiveCount = 0;
   int lastLeftSignal = -1;
   int lastRightSignal = -1;
-
+  int leftblinkCounter = 0;
+  int rightblinkCounter = 0;
+  int toggleLeft = true;
+  int toggleRight = true;
+  String rightMem = "";
+  String leftMem = "";
   // Timing for blinking
   unsigned long previousBlinkMillis = 0;
   const unsigned long blinkInterval = 500; // 500ms blink interval (faster for testing)
@@ -253,17 +258,58 @@ public:
     int rightTurn = FlowSerialReadStringUntil(',').toInt();
     int leftTurn = FlowSerialReadStringUntil('\n').toInt();
     unsigned long totalOdometer = sessionOdo;
+    rightMem += String(rightTurn);
+    leftMem += String(leftTurn);
 
+    if (rightMem == "01")
+      rightblinkCounter++;
+    else if (rightMem == "0000")
+    {
+      rightblinkCounter = 0;
+      rightMem = "";
+      VolvoDIM.setRightBlinker(0);
+    }
+    if (leftMem == "01")
+      leftblinkCounter++;
+    else if (leftMem == "0000")
+    {
+      leftblinkCounter = 0;
+      leftMem = "";
+      VolvoDIM.setLeftBlinker(0);
+    }
+    if (rightTurn)
+      rightblinkCounter++;
+
+    if (leftblinkCounter > 1)
+    {
+      toggleLeft != toggleLeft;
+      VolvoDIM.setLeftBlinker(toggleLeft);
+      leftblinkCounter = 0;
+    }
+    if (rightblinkCounter > 1)
+    {
+      toggleRight != toggleRight;
+      VolvoDIM.setRightBlinker(rightTurn);
+      rightblinkCounter = 0;
+    }
+    if ((rightMem.length()) > 4)
+    {
+      rightMem = "";
+    }
+    if ((leftMem.length()) > 4)
+    {
+      leftMem = "";
+    }
     // ONLY update blinker states based on incoming signals - NO blinking here
-    updateBlinkerStates(leftTurn, rightTurn);
+    // updateBlinkerStates(leftTurn, rightTurn);
 
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
     parseDateTime(currentDateTime, hour, minute, ampm);
     int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
     VolvoDIM.setTime(timeValue);
-    //rpms = map(rpms, 0, 8000, 0, 9000);
-    // Update VolvoDIM gauges
+    // rpms = map(rpms, 0, 8000, 0, 9000);
+    //  Update VolvoDIM gauges
     VolvoDIM.setOutdoorTemp(oilTemp);
     VolvoDIM.setCoolantTemp(waterTemp);
     VolvoDIM.setSpeed(carSpeed);
@@ -272,7 +318,7 @@ public:
     VolvoDIM.setGearPosText(gear.charAt(0));
 
     // Set persistent odometer display
-   // setOdometer(totalOdometer);
+    // setOdometer(totalOdometer);
     VolvoDIM.enableMilageTracking(1);
     // VolvoDIM.setCustomText((String("Odo: ") + String(totalOdometer) + " km").c_str());
     //  Handle all warning lights based on telemetry
@@ -320,8 +366,8 @@ public:
     }
 
     // ALWAYS update the hardware state (not just when toggling)
-    VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
-    VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
+    // VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
+    // VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
   }
 
   void idle()
