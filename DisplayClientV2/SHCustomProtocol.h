@@ -17,20 +17,28 @@ class SHCustomProtocol
 {
 private:
   bool engineOn = false;
-  
-  // Blinker variables
-  int leftTurns = 0;
-  int rightTurns = 0;
-  unsigned long counter = 0;
-  bool blinkerEnabled = false;
-  unsigned long previousMillis = 0;
-  long interval = 1000; // Check every second
-  
+
+  // Blinker state variables
+  bool leftBlinkerActive = false;
+  bool rightBlinkerActive = false;
+  bool leftBlinkerCurrentState = false;  // Current LED state (on/off)
+  bool rightBlinkerCurrentState = false; // Current LED state (on/off)
+
+  // Consecutive signal counters
+  int leftConsecutiveCount = 0;
+  int rightConsecutiveCount = 0;
+  int lastLeftSignal = -1;
+  int lastRightSignal = -1;
+
+  // Timing for blinking
+  unsigned long previousBlinkMillis = 0;
+  const unsigned long blinkInterval = 500; // 500ms blink interval (faster for testing)
+
   // Odometer variables
   unsigned long lastOdometerValue = 0;
   unsigned long storedOdometerValue = 0;
   bool odometerEnabled = false;
-  
+
   // EEPROM addresses for storing odometer
   const int EEPROM_ODOMETER_ADDR = 0;
   const int EEPROM_MAGIC_ADDR = 4;
@@ -48,8 +56,9 @@ private:
   {
     unsigned long magic;
     EEPROM.get(EEPROM_MAGIC_ADDR, magic);
-    
-    if (magic == EEPROM_MAGIC) {
+
+    if (magic == EEPROM_MAGIC)
+    {
       unsigned long savedMileage;
       EEPROM.get(EEPROM_ODOMETER_ADDR, savedMileage);
       return savedMileage;
@@ -61,61 +70,94 @@ private:
   void parseDateTime(String dateTimeStr, int &hour, int &minute, int &ampm)
   {
     int spaceIndex = dateTimeStr.indexOf(' ');
-    if (spaceIndex == -1) return;
-    
+    if (spaceIndex == -1)
+      return;
+
     String timeStr = dateTimeStr.substring(spaceIndex + 1);
-    
+
     ampm = 0;
-    if (timeStr.indexOf("PM") != -1) {
+    if (timeStr.indexOf("PM") != -1)
+    {
       ampm = 1;
     }
-    
+
     int firstColon = timeStr.indexOf(':');
     int secondColon = timeStr.indexOf(':', firstColon + 1);
-    
-    if (firstColon != -1 && secondColon != -1) {
+
+    if (firstColon != -1 && secondColon != -1)
+    {
       hour = timeStr.substring(0, firstColon).toInt();
       minute = timeStr.substring(firstColon + 1, secondColon).toInt();
-      
-      if (hour == 0) {
+
+      if (hour == 0)
+      {
         hour = 12;
-      } else if (hour > 12) {
+      }
+      else if (hour > 12)
+      {
         hour = hour - 12;
       }
     }
   }
 
-  // Updated blinker function that handles persistence
-  void enableBlinker(int state1, int state2)
+  // Handle blinker signals and update active states
+  void updateBlinkerStates(int leftSignal, int rightSignal)
   {
-    counter++;
-    
-    // Set turn signals when active
-    if (state1)
-      leftTurns = 1;
-    if (state2)
-      rightTurns = 1;
-    
-    // Reset counter if either signal is active
-    if (state1 || state2)
-      counter = 0;
-    
-    // After 5 cycles of no input, disable blinkers and clear turn signals
-    if (counter > 5)
+    // Handle left blinker
+    if (leftSignal == lastLeftSignal)
     {
-      counter = 0;
-      leftTurns = 0;   // Clear left turn signal
-      rightTurns = 0;  // Clear right turn signal
-      blinkerEnabled = false;
+      leftConsecutiveCount++;
     }
     else
     {
-      blinkerEnabled = true;
+      leftConsecutiveCount = 1;
+      lastLeftSignal = leftSignal;
+
+      // Start blinking when signal goes to 1
+      if (leftSignal == 1)
+      {
+        leftBlinkerActive = true;
+        leftBlinkerCurrentState = true; // Start with LED on
+      }
+    }
+
+    // Stop left blinker after 5 consecutive identical signals
+    if (leftConsecutiveCount >= 5)
+    {
+      leftBlinkerActive = false;
+      leftBlinkerCurrentState = false;
+      leftConsecutiveCount = 0;
+    }
+
+    // Handle right blinker
+    if (rightSignal == lastRightSignal)
+    {
+      rightConsecutiveCount++;
+    }
+    else
+    {
+      rightConsecutiveCount = 1;
+      lastRightSignal = rightSignal;
+
+      // Start blinking when signal goes to 1
+      if (rightSignal == 1)
+      {
+        rightBlinkerActive = true;
+        rightBlinkerCurrentState = true; // Start with LED on
+      }
+    }
+
+    // Stop right blinker after 5 consecutive identical signals
+    if (rightConsecutiveCount >= 5)
+    {
+      rightBlinkerActive = false;
+      rightBlinkerCurrentState = false;
+      rightConsecutiveCount = 0;
     }
   }
 
   // Send custom CAN message
-  void sendCustomCANMessage(unsigned long canId, unsigned char* data, int dataLength = 8)
+  void sendCustomCANMessage(unsigned long canId, unsigned char *data, int dataLength = 8)
   {
     CAN.sendMsgBuf(canId, 1, dataLength, data);
   }
@@ -123,27 +165,31 @@ private:
   // Custom odometer display function with EEPROM persistence
   void setOdometer(unsigned long mileage)
   {
-    if (!odometerEnabled) {
+    if (!odometerEnabled)
+    {
       return;
     }
-    
-    if (mileage == 0 || mileage < storedOdometerValue) {
+
+    if (mileage == 0 || mileage < storedOdometerValue)
+    {
       mileage = storedOdometerValue;
     }
-    
-    if (abs((long)(mileage - lastOdometerValue)) > 0) {
+
+    if (abs((long)(mileage - lastOdometerValue)) > 0)
+    {
       lastOdometerValue = mileage;
-      
-      if (mileage - storedOdometerValue >= 10 || mileage < storedOdometerValue) {
+
+      if (mileage - storedOdometerValue >= 10 || mileage < storedOdometerValue)
+      {
         storedOdometerValue = mileage;
         saveOdometerToEEPROM(mileage);
       }
-      
+
       unsigned long odometerCanId = 0x217FFC;
       unsigned char odometerData[8] = {0x01, 0xEB, 0x00, 0xD8, 0xF0, 0x58, 0x00, 0x00};
-      
+
       odometerData[7] = (mileage & 0xFF);
-      
+
       sendCustomCANMessage(odometerCanId, odometerData);
       delay(10);
     }
@@ -153,7 +199,8 @@ private:
   void enableOdometer(bool enable)
   {
     odometerEnabled = enable;
-    if (enable) {
+    if (enable)
+    {
       storedOdometerValue = loadOdometerFromEEPROM();
       lastOdometerValue = storedOdometerValue;
     }
@@ -181,13 +228,14 @@ public:
     VolvoDIM.init();
     VolvoDIM.enableSerialErrorMessages();
     enableOdometer(true);
-    
-    if (storedOdometerValue > 0) {
+
+    if (storedOdometerValue > 0)
+    {
       setOdometer(storedOdometerValue);
     }
   }
 
-  // Called when new data is coming from computer
+  // Called when new data is coming from computer - ONLY update states, no blinking logic
   void read()
   {
     int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);
@@ -206,15 +254,15 @@ public:
     int leftTurn = FlowSerialReadStringUntil('\n').toInt();
     unsigned long totalOdometer = sessionOdo;
 
-    // Update blinker persistence
-    enableBlinker(leftTurn, rightTurn);
+    // ONLY update blinker states based on incoming signals - NO blinking here
+    updateBlinkerStates(leftTurn, rightTurn);
 
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
     parseDateTime(currentDateTime, hour, minute, ampm);
     int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
     VolvoDIM.setTime(timeValue);
-
+    //rpms = map(rpms, 0, 8000, 0, 9000);
     // Update VolvoDIM gauges
     VolvoDIM.setOutdoorTemp(oilTemp);
     VolvoDIM.setCoolantTemp(waterTemp);
@@ -222,15 +270,16 @@ public:
     VolvoDIM.setGasLevel(fuelPercent);
     VolvoDIM.setRpm(rpms);
     VolvoDIM.setGearPosText(gear.charAt(0));
-    
+
     // Set persistent odometer display
-    setOdometer(totalOdometer);
-    
-    // Handle all warning lights based on telemetry
+   // setOdometer(totalOdometer);
+    VolvoDIM.enableMilageTracking(1);
+    // VolvoDIM.setCustomText((String("Odo: ") + String(totalOdometer) + " km").c_str());
+    //  Handle all warning lights based on telemetry
     handleWarningLights(rpms, waterTemp, oilTemp, fuelPercent, brake, carSpeed, opponentsCount, rpmShiftLight);
-    
+
     VolvoDIM.enableDisableDingNoise(gameVolume > 0 ? 0 : 0);
-    
+
     // Set brightness based on shift light
     int brightness = map(rpmShiftLight, 0, 8000, 50, 256);
     VolvoDIM.setTotalBrightness(255);
@@ -238,42 +287,41 @@ public:
     VolvoDIM.setLcdBrightness(255);
   }
 
-  // Called once per arduino loop - handle blinker timing here
+  // Called continuously - HANDLE ALL BLINKING LOGIC HERE
   void loop()
   {
     VolvoDIM.simulate();
-    
+
+    // Handle blinking timing continuously
     unsigned long currentMillis = millis();
-    if ((currentMillis - previousMillis >= interval))
+
+    if (currentMillis - previousBlinkMillis >= blinkInterval)
     {
-      previousMillis = currentMillis;
-      
-      // Handle blinker logic based on persistent variables
-      if (rightTurns == 1 && leftTurns == 1)
+      previousBlinkMillis = currentMillis;
+
+      // Toggle blinker states ONLY if they're active
+      if (leftBlinkerActive)
       {
-        // Both blinkers on (hazard lights)
-        VolvoDIM.setRightBlinker(1);
-        VolvoDIM.setLeftBlinker(1);
+        leftBlinkerCurrentState = !leftBlinkerCurrentState;
       }
-      else if (rightTurns == 0 && leftTurns == 0)
+      else
       {
-        // Both blinkers off
-        VolvoDIM.setRightBlinker(0);
-        VolvoDIM.setLeftBlinker(0);
+        leftBlinkerCurrentState = false;
       }
-      else if (rightTurns == 1 && leftTurns == 0)
+
+      if (rightBlinkerActive)
       {
-        // Right blinker only
-        VolvoDIM.setRightBlinker(1);
-        VolvoDIM.setLeftBlinker(0);
+        rightBlinkerCurrentState = !rightBlinkerCurrentState;
       }
-      else if (leftTurns == 1 && rightTurns == 0)
+      else
       {
-        // Left blinker only
-        VolvoDIM.setLeftBlinker(1);
-        VolvoDIM.setRightBlinker(0);
+        rightBlinkerCurrentState = false;
       }
     }
+
+    // ALWAYS update the hardware state (not just when toggling)
+    VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
+    VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
   }
 
   void idle()
