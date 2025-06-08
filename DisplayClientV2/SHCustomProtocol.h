@@ -10,7 +10,7 @@
 
 VolvoDIM VolvoDIM(9, 6);
 
-// External CAN object from VolvoDIM library
+// External CAN object from VolvoDIM library for custpom coms
 extern mcp2515_can CAN;
 
 class SHCustomProtocol
