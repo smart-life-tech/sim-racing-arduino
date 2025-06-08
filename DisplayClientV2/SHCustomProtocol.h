@@ -10,7 +10,7 @@
 
 VolvoDIM VolvoDIM(9, 6);
 
-// External CAN object from VolvoDIM library for custpom coms
+// External CAN object from VolvoDIM library
 extern mcp2515_can CAN;
 
 class SHCustomProtocol
@@ -29,12 +29,7 @@ private:
   int rightConsecutiveCount = 0;
   int lastLeftSignal = -1;
   int lastRightSignal = -1;
-  int leftblinkCounter = 0;
-  int rightblinkCounter = 0;
-  int toggleLeft = true;
-  int toggleRight = true;
-  String rightMem = "";
-  String leftMem = "";
+
   // Timing for blinking
   unsigned long previousBlinkMillis = 0;
   const unsigned long blinkInterval = 500; // 500ms blink interval (faster for testing)
@@ -238,6 +233,36 @@ public:
     {
       setOdometer(storedOdometerValue);
     }
+
+    // TEST BLINKING - Enable both blinkers for testing
+    leftBlinkerActive = true;
+    rightBlinkerActive = true;
+    leftBlinkerCurrentState = true;
+    rightBlinkerCurrentState = true;
+
+    // Test blink sequence for 10 seconds
+    for (int i = 0; i < 20; i++)
+    { // 20 cycles = 10 seconds at 500ms each
+      // Turn both blinkers on
+      VolvoDIM.setLeftBlinkerSolid(1);
+      VolvoDIM.setRightBlinkerSolid(1);
+      VolvoDIM.simulate(); // Let VolvoDIM process
+      delay(500);
+
+      // Turn both blinkers off
+      VolvoDIM.setLeftBlinkerSolid(0);
+      VolvoDIM.setRightBlinkerSolid(0);
+      VolvoDIM.simulate(); // Let VolvoDIM process
+      delay(500);
+    }
+
+    // Reset blinker states after test
+    leftBlinkerActive = false;
+    rightBlinkerActive = false;
+    leftBlinkerCurrentState = false;
+    rightBlinkerCurrentState = false;
+    VolvoDIM.setLeftBlinkerSolid(0);
+    VolvoDIM.setRightBlinkerSolid(0);
   }
 
   // Called when new data is coming from computer - ONLY update states, no blinking logic
@@ -258,58 +283,17 @@ public:
     int rightTurn = FlowSerialReadStringUntil(',').toInt();
     int leftTurn = FlowSerialReadStringUntil('\n').toInt();
     unsigned long totalOdometer = sessionOdo;
-    rightMem += String(rightTurn);
-    leftMem += String(leftTurn);
 
-    if (rightMem == "01")
-      rightblinkCounter++;
-    else if (rightMem == "0000")
-    {
-      rightblinkCounter = 0;
-      rightMem = "";
-      VolvoDIM.setRightBlinker(0);
-    }
-    if (leftMem == "01")
-      leftblinkCounter++;
-    else if (leftMem == "0000")
-    {
-      leftblinkCounter = 0;
-      leftMem = "";
-      VolvoDIM.setLeftBlinker(0);
-    }
-    if (rightTurn)
-      rightblinkCounter++;
-
-    if (leftblinkCounter > 1)
-    {
-      toggleLeft != toggleLeft;
-      VolvoDIM.setLeftBlinker(toggleLeft);
-      leftblinkCounter = 0;
-    }
-    if (rightblinkCounter > 1)
-    {
-      toggleRight != toggleRight;
-      VolvoDIM.setRightBlinker(rightTurn);
-      rightblinkCounter = 0;
-    }
-    if ((rightMem.length()) > 4)
-    {
-      rightMem = "";
-    }
-    if ((leftMem.length()) > 4)
-    {
-      leftMem = "";
-    }
     // ONLY update blinker states based on incoming signals - NO blinking here
-    // updateBlinkerStates(leftTurn, rightTurn);
+    updateBlinkerStates(leftTurn, rightTurn);
 
     // Parse date/time and set clock
     int hour = 12, minute = 0, ampm = 0;
     parseDateTime(currentDateTime, hour, minute, ampm);
     int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
     VolvoDIM.setTime(timeValue);
-    // rpms = map(rpms, 0, 8000, 0, 9000);
-    //  Update VolvoDIM gauges
+
+    // Update VolvoDIM gauges
     VolvoDIM.setOutdoorTemp(oilTemp);
     VolvoDIM.setCoolantTemp(waterTemp);
     VolvoDIM.setSpeed(carSpeed);
@@ -318,10 +302,9 @@ public:
     VolvoDIM.setGearPosText(gear.charAt(0));
 
     // Set persistent odometer display
-    // setOdometer(totalOdometer);
-    VolvoDIM.enableMilageTracking(1);
-    // VolvoDIM.setCustomText((String("Odo: ") + String(totalOdometer) + " km").c_str());
-    //  Handle all warning lights based on telemetry
+    //setOdometer(totalOdometer);
+
+    // Handle all warning lights based on telemetry
     handleWarningLights(rpms, waterTemp, oilTemp, fuelPercent, brake, carSpeed, opponentsCount, rpmShiftLight);
 
     VolvoDIM.enableDisableDingNoise(gameVolume > 0 ? 0 : 0);
@@ -366,8 +349,8 @@ public:
     }
 
     // ALWAYS update the hardware state (not just when toggling)
-    // VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
-    // VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
+    VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
+    VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
   }
 
   void idle()
