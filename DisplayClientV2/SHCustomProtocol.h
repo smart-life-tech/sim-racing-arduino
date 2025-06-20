@@ -113,13 +113,19 @@ private:
       leftConsecutiveCount = 1;
       lastLeftSignal = leftSignal;
 
-      // Start blinking when signal goes to 1
-      if (leftSignal == 1)
-      {
-        leftBlinkerActive = true;
-        leftBlinkerCurrentState = true; // Start with LED on
-      }
-    }
+          // Start blinking when signal goes to 1 - RESET TIMING HERE
+          if (leftSignal == 1)
+          {
+            leftBlinkerActive = true;
+            leftBlinkerCurrentState = true; // Start with LED on
+            previousBlinkMillis = millis(); // SYNC: Reset the blink timer
+          }
+          // Immediately turn off when signal goes to 0
+          else if (leftSignal == 0)
+          {
+            leftBlinkerActive = false;
+            leftBlinkerCurrentState = false;
+          }    }
 
     // Stop left blinker after 5 consecutive identical signals
     if (leftConsecutiveCount >= 5)
