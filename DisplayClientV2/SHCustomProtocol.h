@@ -23,10 +23,21 @@ private:
   bool rightBlinkerActive = false;
   bool leftBlinkerCurrentState = false;
   bool rightBlinkerCurrentState = false;
-
+// BLINKER PATTERN CONTROL
+  enum BlinkerPattern {
+    PATTERN_LEFT = 0,
+    PATTERN_RIGHT = 1,
+    PATTERN_BOTH = 2
+  };
+  
+  BlinkerPattern currentPattern = PATTERN_LEFT;
+  int blinksInCurrentPattern = 0;
+  const int blinksPerPattern = 3; // 3 blinks per pattern
+  unsigned long lastPatternChange = 0;
+  bool patternJustChanged = false;
   // Timing for blinking
   unsigned long previousBlinkMillis = 0;
-  const unsigned long blinkInterval = 500; // 500ms blink interval
+  const unsigned long blinkInterval = 1500; // 500ms blink interval
 
   // SIMULATION MODE VARIABLES
   bool simulationMode = true;
@@ -142,81 +153,20 @@ private:
     }
   }
   
-  void handleTurnSignalCycling(unsigned long currentMillis) {
-    // Cycle through turn signals: Off -> Left -> Right -> Both -> repeat
-    unsigned long elapsed = currentMillis - lastTurnSignalChange;
+  void handleTurnSignalCycling(unsigned long currentMilli) {
+      // BLINKER PATTERN HANDLER - FIXED VERSION
+    unsigned long currentMillis = millis();
     
-    bool shouldChange = false;
-    
-    switch (currentTurnState) {
-      case 0: // Off state
-        if (elapsed >= turnSignalOffDuration) {
-          currentTurnState = 1; // Go to left
-          shouldChange = true;
-        }
-        break;
-        
-      case 1: // Left on
-        if (elapsed >= turnSignalDuration) {
-          currentTurnState = 2; // Go to right
-          shouldChange = true;
-        }
-        break;
-        
-      case 2: // Right on
-        if (elapsed >= turnSignalDuration) {
-          currentTurnState = 3; // Go to both
-          shouldChange = true;
-        }
-        break;
-        
-      case 3: // Both on
-        if (elapsed >= turnSignalDuration) {
-          currentTurnState = 0; // Go to off
-          shouldChange = true;
-        }
-        break;
+    // Handle the blinking timing (500ms on/off)
+    if (currentMillis - previousBlinkMillis >= blinkInterval) {
+      previousBlinkMillis = currentMillis;
+      leftBlinkerCurrentState = !leftBlinkerCurrentState;
+      rightBlinkerCurrentState = !rightBlinkerCurrentState;
     }
-    
-    if (shouldChange) {
-      lastTurnSignalChange = currentMillis;
-      
-      // Set turn signal states directly
-      switch (currentTurnState) {
-        case 0: // Off
-          leftBlinkerActive = false;
-          rightBlinkerActive = false;
-          break;
-          
-        case 1: // Left only
-          leftBlinkerActive = true;
-          rightBlinkerActive = false;
-          // Reset blink timing when starting
-          leftBlinkerCurrentState = true;
-          previousBlinkMillis = currentMillis;
-          break;
-          
-        case 2: // Right only
-          leftBlinkerActive = false;
-          rightBlinkerActive = true;
-          // Reset blink timing when starting
-          rightBlinkerCurrentState = true;
-          previousBlinkMillis = currentMillis;
-          break;
-          
-        case 3: // Both
-          leftBlinkerActive = true;
-          rightBlinkerActive = true;
-          // Reset blink timing when starting
-          leftBlinkerCurrentState = true;
-          rightBlinkerCurrentState = true;
-          previousBlinkMillis = currentMillis;
-          break;
-      }
-      
-      Serial.print("Turn signal changed to state: ");
-      Serial.println(currentTurnState);
-    }
+    VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
+    VolvoDIM.simulate();
+    VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 0 : 0);
+    VolvoDIM.simulate();
   }
   
   void updateDisplayValues() {
@@ -384,7 +334,10 @@ public:
     enableOdometer(true);
     
     Serial.println("=== Setup Complete - Simulation Active ===");
-
+    // Initialize blinker pattern
+    currentPattern = PATTERN_LEFT;
+    blinksInCurrentPattern = 0;
+    patternJustChanged = true;
     Serial.println("Boot test complete - Starting simulation");
   }
 
@@ -456,27 +409,27 @@ public:
     }
 
     // Handle blinker timing - this creates the actual blinking effect
-    unsigned long currentMillis = millis();
-    if (currentMillis - previousBlinkMillis >= blinkInterval) {
-      previousBlinkMillis = currentMillis;
+    // unsigned long currentMillis = millis();
+    // if (currentMillis - previousBlinkMillis >= blinkInterval) {
+    //   previousBlinkMillis = currentMillis;
 
-      // Toggle blinker LED states if the blinker is active
-      if (leftBlinkerActive) {
-        leftBlinkerCurrentState = !leftBlinkerCurrentState;
-      } else {
-        leftBlinkerCurrentState = false;
-      }
+    //   // Toggle blinker LED states if the blinker is active
+    //   if (leftBlinkerActive) {
+    //     leftBlinkerCurrentState = !leftBlinkerCurrentState;
+    //   } else {
+    //     leftBlinkerCurrentState = false;
+    //   }
 
-      if (rightBlinkerActive) {
-        rightBlinkerCurrentState = !rightBlinkerCurrentState;
-      } else {
-        rightBlinkerCurrentState = false;
-      }
-    }
+    //   if (rightBlinkerActive) {
+    //     rightBlinkerCurrentState = !rightBlinkerCurrentState;
+    //   } else {
+    //     rightBlinkerCurrentState = false;
+    //   }
+    // }
 
-    // Always update hardware state with current LED states
-    VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
-    VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
+    // // Always update hardware state with current LED states
+    // VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
+    // VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
     
     // Call simulate again to ensure updates are processed
     VolvoDIM.simulate();
