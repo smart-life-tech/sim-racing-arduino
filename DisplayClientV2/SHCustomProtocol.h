@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 #include <VolvoDIM.h>
-#include <EEPROM.h>
 #include <mcp2515_can.h>
 #include <mcp_can.h>
 #include <SPI.h>
@@ -16,535 +15,208 @@ extern mcp2515_can CAN;
 class SHCustomProtocol
 {
   private:
-    bool engineOn = false;
-
-    // Blinker state variables
-    bool leftBlinkerActive = false;
-    bool rightBlinkerActive = false;
-    bool leftBlinkerCurrentState = false;
-    bool rightBlinkerCurrentState = false;
-    // BLINKER PATTERN CONTROL
-    enum BlinkerPattern {
-      PATTERN_LEFT = 0,
-      PATTERN_RIGHT = 1,
-      PATTERN_BOTH = 2
-    };
-
-    BlinkerPattern currentPattern = PATTERN_LEFT;
-    int blinksInCurrentPattern = 0;
-    const int blinksPerPattern = 3; // 3 blinks per pattern
-    unsigned long lastPatternChange = 0;
-    bool patternJustChanged = false;
-    // Timing for blinking
-    unsigned long previousBlinkMillis = 0;
-    const unsigned long blinkInterval = 1000; // 500ms blink interval
-
-    // SIMULATION MODE VARIABLES
-    bool simulationMode = true;
-    unsigned long lastSimulationUpdate = 0;
-    const unsigned long simulationInterval = 200;
-
-    // Simulation data variables
-    int simWaterTemp = 180;
-    int simCarSpeed = 60;
-    int simRpms = 3000;
-    int simFuelPercent = 75;
-    int simOilTemp = 200;
-    String simGear = "3";
-    int simBrake = 0;
-    int simLeftTurn = 0;
-    int simRightTurn = 0;
-    bool simIncreasing = true;
-    unsigned long simStartTime = 0;
-    bool simInitialized = false;
-
-    // Turn signal timing
-    unsigned long lastTurnSignalChange = 0;
-    const unsigned long turnSignalDuration = 3000; // 3 seconds on, 1 second off
-    const unsigned long turnSignalOffDuration = 1000;
-    int currentTurnState = 0; // 0=off, 1=left, 2=right, 3=both
-
-    // Odometer variables
-    unsigned long lastOdometerValue = 0;
-    unsigned long storedOdometerValue = 0;
-    bool odometerEnabled = false;
-
-    // EEPROM addresses
-    const int EEPROM_ODOMETER_ADDR = 0;
-    const int EEPROM_MAGIC_ADDR = 4;
-    const unsigned long EEPROM_MAGIC = 0xDEADBEEF;
-
-    // SIMULATION DATA GENERATOR
-    void generateSimulationData() {
-      if (!simulationMode) return;
-
-      unsigned long currentMillis = millis();
-
-      // Initialize simulation data once
-      if (!simInitialized) {
-        simInitialized = true;
-        simStartTime = currentMillis;
-        lastTurnSignalChange = currentMillis;
-
-        // Set initial values
-        simRpms = 3000;
-        simCarSpeed = 60;
-        simWaterTemp = 180;
-        simOilTemp = 200;
-        simFuelPercent = 75;
-        simGear = "3";
-
-        Serial.println("Simulation initialized");
-
-        // Set initial display values
-        updateDisplayValues();
-        return;
+    // Pack boolean variables into bit fields to save memory
+    struct {
+      bool leftActive : 1;
+      bool rightActive : 1;
+      bool tcActive : 1;
+      bool absActive : 1;
+      bool highBeamActive : 1;
+      bool tcState : 1;
+      bool absState : 1;
+      bool autoTestEnabled : 1;
+    } flags;
+    
+    // Use smaller data types
+    uint8_t testPhase;
+    uint16_t blinkerUpdateInterval;
+    uint16_t warningUpdateInterval;
+    uint16_t phaseDuration;
+    
+    // Timing variables
+    unsigned long lastBlinkerUpdate;
+    unsigned long lastWarningUpdate;
+    unsigned long phaseStart;
+    
+    // Custom CAN functions - simplified
+    void sendCANMessage(uint8_t canId, bool state) {
+      uint8_t data[8] = {0};
+      data[0] = state ? 0x01 : 0x00;
+      CAN.sendMsgBuf(canId, 1, 8, data);
+    }
+    
+    void updateBlinkers() {
+      unsigned long now = millis();
+      
+      if (now - lastBlinkerUpdate >= blinkerUpdateInterval) {
+        lastBlinkerUpdate = now;
+        
+        // Use VolvoDIM's built-in blinker system
+        VolvoDIM.setLeftBlinker(flags.leftActive ? 1 : 0);
+        VolvoDIM.setRightBlinker(flags.rightActive ? 1 : 0);
       }
+    }
 
-      if (currentMillis - lastSimulationUpdate >= simulationInterval) {
-        lastSimulationUpdate = currentMillis;
-
-        // Simple RPM cycling
-        if (simIncreasing) {
-          simRpms += 100;
-          if (simRpms >= 6000) {
-            simIncreasing = false;
-          }
+    void handleWarningLights() {
+      unsigned long now = millis();
+      
+      if (now - lastWarningUpdate >= warningUpdateInterval) {
+        lastWarningUpdate = now;
+        
+        // Toggle TC and ABS if active
+        if (flags.tcActive) {
+          flags.tcState = !flags.tcState;
         } else {
-          simRpms -= 100;
-          if (simRpms <= 1000) {
-            simIncreasing = true;
-          }
+          flags.tcState = false;
         }
+        
+        if (flags.absActive) {
+          flags.absState = !flags.absState;
+        } else {
+          flags.absState = false;
+        }
+        
+        // Send CAN messages
+        sendCANMessage(4, flags.tcState);    // TC
+        sendCANMessage(5, flags.absState);   // ABS
+        sendCANMessage(6, flags.highBeamActive); // High Beam
+      }
+    }
 
-        // Update other values
-        simCarSpeed = simRpms / 50;
-
-        if (simRpms < 1500) simGear = "1";
-        else if (simRpms < 2500) simGear = "2";
-        else if (simRpms < 3500) simGear = "3";
-        else if (simRpms < 4500) simGear = "4";
-        else simGear = "5";
-
-        simWaterTemp = 170 + (simRpms / 200);
-        simOilTemp = 190 + (simRpms / 150);
-
-        // Handle turn signal cycling
-        handleTurnSignalCycling(currentMillis);
-
-        // Update display
-        updateDisplayValues();
-
-        // Debug output (less frequent)
-        static int debugCounter = 0;
-        debugCounter++;
-        if (debugCounter >= 25) {
-          Serial.print("RPM: ");
-          Serial.print(simRpms);
-          Serial.print(", Turn State: ");
-          Serial.print(currentTurnState);
-          Serial.print(" (L:");
-          Serial.print(leftBlinkerActive ? "ON" : "OFF");
-          Serial.print(", R:");
-          Serial.print(rightBlinkerActive ? "ON" : "OFF");
-          Serial.println(")");
-          
-        previousBlinkMillis = currentMillis;
-        leftBlinkerCurrentState = !leftBlinkerCurrentState;
-        rightBlinkerCurrentState = !rightBlinkerCurrentState;
-      VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
-      VolvoDIM.simulate();
-      //delay(500);
-      VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 0 : 0);
-      VolvoDIM.simulate();
-          debugCounter = 0;
+    void runTestSequence() {
+      if (!flags.autoTestEnabled) return;
+      
+      unsigned long now = millis();
+      
+      if (now - phaseStart >= phaseDuration) {
+        phaseStart = now;
+        testPhase = (testPhase + 1) % 8;
+        
+        // Reset all states
+        flags.leftActive = flags.rightActive = false;
+        flags.tcActive = flags.absActive = flags.highBeamActive = false;
+        
+        switch (testPhase) {
+          case 0: flags.leftActive = true; break;
+          case 1: flags.rightActive = true; break;
+          case 2: flags.leftActive = flags.rightActive = true; break;
+          case 3: flags.tcActive = true; break;
+          case 4: flags.absActive = true; break;
+          case 5: flags.highBeamActive = true; break;
+          case 6: 
+            flags.leftActive = flags.rightActive = true;
+            flags.tcActive = flags.absActive = flags.highBeamActive = true;
+            break;
+          case 7: break; // All off
         }
       }
     }
 
-    void handleTurnSignalCycling(unsigned long currentMilli) {
-      // BLINKER PATTERN HANDLER - FIXED VERSION
-      unsigned long currentMillis = millis();
-      //Serial.print("blinking at : ");
-      //Serial.println(currentMillis);
-      // Handle the blinking timing (500ms on/off)
-      if (currentMillis - previousBlinkMillis >= blinkInterval) {
-        previousBlinkMillis = currentMillis;
-        leftBlinkerCurrentState = !leftBlinkerCurrentState;
-        rightBlinkerCurrentState = !rightBlinkerCurrentState;
-      }
-    }
-
-    void updateDisplayValues() {
-      // Set time
-      int timeValue = VolvoDIM.clockToDecimal(12, 30, 0);
-      VolvoDIM.setTime(timeValue);
-
-      // Update all gauges
-      VolvoDIM.setRpm(simRpms);
-      VolvoDIM.setSpeed(simCarSpeed);
-      VolvoDIM.setCoolantTemp(simWaterTemp);
-      VolvoDIM.setOutdoorTemp(simOilTemp);
-      VolvoDIM.setGasLevel(simFuelPercent);
-      VolvoDIM.setGearPosText(simGear.charAt(0));
-
-      // Handle warning lights based on values
-      VolvoDIM.engineServiceRequiredOrange(simRpms > 5500 ? 1 : 0);
-      VolvoDIM.fuelFillerCapLoose(simFuelPercent < 20 ? 1 : 0);
-      VolvoDIM.engineSystemServiceUrgentRed(simWaterTemp > 210 ? 1 : 0);
-      VolvoDIM.slowDownOrShiftUpOrange(simRpms > 5000 ? 1 : 0);
-      VolvoDIM.enableTrailer(1); // Always on for testing
-
-      // Always set brightness to maximum
-      VolvoDIM.setTotalBrightness(255);
-      VolvoDIM.setOverheadBrightness(255);
-      VolvoDIM.setLcdBrightness(255);
-    }
-
-    // Function to save odometer to EEPROM
-    void saveOdometerToEEPROM(unsigned long mileage) {
-      EEPROM.put(EEPROM_ODOMETER_ADDR, mileage);
-      EEPROM.put(EEPROM_MAGIC_ADDR, EEPROM_MAGIC);
-    }
-
-    // Function to load odometer from EEPROM
-    unsigned long loadOdometerFromEEPROM() {
-      unsigned long magic;
-      EEPROM.get(EEPROM_MAGIC_ADDR, magic);
-      if (magic == EEPROM_MAGIC) {
-        unsigned long savedMileage;
-        EEPROM.get(EEPROM_ODOMETER_ADDR, savedMileage);
-        return savedMileage;
-      }
-      return 0;
-    }
-
-    // Function to parse date/time string
-    void parseDateTime(String dateTimeStr, int &hour, int &minute, int &ampm) {
-      int spaceIndex = dateTimeStr.indexOf(' ');
-      if (spaceIndex == -1) return;
-
-      String timeStr = dateTimeStr.substring(spaceIndex + 1);
-      ampm = 0;
-      if (timeStr.indexOf("PM") != -1) {
-        ampm = 1;
-      }
-
-      int firstColon = timeStr.indexOf(':');
-      int secondColon = timeStr.indexOf(':', firstColon + 1);
-
-      if (firstColon != -1 && secondColon != -1) {
-        hour = timeStr.substring(0, firstColon).toInt();
-        minute = timeStr.substring(firstColon + 1, secondColon).toInt();
-
-        if (hour == 0) {
-          hour = 12;
-        } else if (hour > 12) {
-          hour = hour - 12;
+    void handleSerialCommands() {
+      if (Serial.available()) {
+        char cmd = Serial.read();
+        
+        // Simple single character commands to save memory
+        switch (cmd) {
+          case '1': flags.leftActive = true; flags.autoTestEnabled = false; break;
+          case '2': flags.leftActive = false; break;
+          case '3': flags.rightActive = true; flags.autoTestEnabled = false; break;
+          case '4': flags.rightActive = false; break;
+          case '5': flags.tcActive = true; flags.autoTestEnabled = false; break;
+          case '6': flags.tcActive = false; break;
+          case '7': flags.absActive = true; flags.autoTestEnabled = false; break;
+          case '8': flags.absActive = false; break;
+          case '9': flags.highBeamActive = true; flags.autoTestEnabled = false; break;
+          case '0': flags.highBeamActive = false; break;
+          case 'a': flags.autoTestEnabled = true; break;
+          case 's': flags.autoTestEnabled = false; break;
+          case 'h': printHelp(); break;
+          case 'x': // All off
+            flags.leftActive = flags.rightActive = false;
+            flags.tcActive = flags.absActive = flags.highBeamActive = false;
+            break;
         }
+        
+        // Clear remaining characters
+        while (Serial.available()) Serial.read();
       }
     }
 
-    // SIMPLIFIED blinker update - no consecutive count logic for simulation
-    void updateBlinkerStates(int leftSignal, int rightSignal) {
-      // For simulation mode, we handle blinkers differently
-      if (simulationMode) {
-        // Don't use this function in simulation mode
-        // Blinker states are handled directly in handleTurnSignalCycling
-        return;
-      }
-
-      // Original logic for real SimHub data (when not in simulation)
-      static int lastLeftSignal = -1;
-      static int lastRightSignal = -1;
-      static int leftConsecutiveCount = 0;
-      static int rightConsecutiveCount = 0;
-
-      // Handle left blinker
-      if (leftSignal == lastLeftSignal) {
-        leftConsecutiveCount++;
-      } else {
-        leftConsecutiveCount = 1;
-        lastLeftSignal = leftSignal;
-
-        if (leftSignal == 1) {
-          leftBlinkerActive = true;
-          leftBlinkerCurrentState = true;
-          previousBlinkMillis = millis();
-        } else if (leftSignal == 0) {
-          leftBlinkerActive = false;
-          leftBlinkerCurrentState = false;
-        }
-      }
-
-      if (leftConsecutiveCount >= 5) {
-        leftBlinkerActive = false;
-        leftBlinkerCurrentState = false;
-        leftConsecutiveCount = 0;
-      }
-
-      // Handle right blinker
-      if (rightSignal == lastRightSignal) {
-        rightConsecutiveCount++;
-      } else {
-        rightConsecutiveCount = 1;
-        lastRightSignal = rightSignal;
-
-        if (rightSignal == 1) {
-          rightBlinkerActive = true;
-          rightBlinkerCurrentState = true;
-          previousBlinkMillis = millis();
-        } else if (rightSignal == 0) {
-          rightBlinkerActive = false;
-          rightBlinkerCurrentState = false;
-        }
-      }
-
-      if (rightConsecutiveCount >= 5) {
-        rightBlinkerActive = false;
-        rightBlinkerCurrentState = false;
-        rightConsecutiveCount = 0;
-      }
-    }
-
-    // Send custom CAN message
-    void sendCustomCANMessage(unsigned long canId, unsigned char *data, int dataLength = 8) {
-      CAN.sendMsgBuf(canId, 1, dataLength, data);
-    }
-
-    // Enable/disable odometer display
-    void enableOdometer(bool enable) {
-      odometerEnabled = enable;
-      if (enable) {
-        storedOdometerValue = loadOdometerFromEEPROM();
-        lastOdometerValue = storedOdometerValue;
-      }
+    void printHelp() {
+      // Use F() macro to store strings in flash memory instead of RAM
+      Serial.println(F("=== COMMANDS ==="));
+      Serial.println(F("1/2 - Left ON/OFF"));
+      Serial.println(F("3/4 - Right ON/OFF"));
+      Serial.println(F("5/6 - TC ON/OFF"));
+      Serial.println(F("7/8 - ABS ON/OFF"));
+      Serial.println(F("9/0 - HB ON/OFF"));
+      Serial.println(F("a/s - Auto ON/OFF"));
+      Serial.println(F("x - All OFF"));
+      Serial.println(F("h - Help"));
     }
 
   public:
-    // Setup method
     void setup() {
       Serial.begin(115200);
-      Serial.println("=== Starting SHCustomProtocol ===");
-
-      // Initialize VolvoDIM with delays
-      Serial.println("Initializing VolvoDIM...");
+      Serial.println(F("=== Blinker Test ==="));
+      
+      // Initialize bit field structure
+      flags.leftActive = false;
+      flags.rightActive = false;
+      flags.tcActive = false;
+      flags.absActive = false;
+      flags.highBeamActive = false;
+      flags.tcState = false;
+      flags.absState = false;
+      flags.autoTestEnabled = true;
+      
+      // Initialize variables
+      testPhase = 0;
+      blinkerUpdateInterval = 100;
+      warningUpdateInterval = 1000;
+      phaseDuration = 3000;
+      
       VolvoDIM.gaugeReset();
-      delay(500);
+      delay(1000);
       VolvoDIM.init();
-      delay(500);
-      VolvoDIM.enableSerialErrorMessages();
-      delay(100);
-
-      // Enable odometer
-      enableOdometer(true);
-
-      Serial.println("=== Setup Complete - Simulation Active ===");
-      // Initialize blinker pattern
-      currentPattern = PATTERN_LEFT;
-      blinksInCurrentPattern = 0;
-      patternJustChanged = true;
-      Serial.println("Boot test complete - Starting simulation");
-    }
-
-    // Read method (for real data - disabled in simulation)
-    // Read method (for real data - disabled in simulation)
-    void read() {
-      if (simulationMode) return; // Skip if in simulation mode
-
-      // Original read implementation for real SimHub data
-      int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);
-      int carSpeed = FlowSerialReadStringUntil(',').toInt();
-      int rpms = FlowSerialReadStringUntil(',').toInt();
-      int fuelPercent = FlowSerialReadStringUntil(',').toInt();
-      int oilTemp = FlowSerialReadStringUntil(',').toInt();
-      String gear = FlowSerialReadStringUntil(',');
-      String currentDateTime = FlowSerialReadStringUntil(',');
-      int sessionOdo = FlowSerialReadStringUntil(',').toInt();
-      int gameVolume = FlowSerialReadStringUntil(',').toInt();
-      int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();
-      int brake = FlowSerialReadStringUntil(',').toInt();
-      int opponentsCount = FlowSerialReadStringUntil(',').toInt();
-      int rightTurn = FlowSerialReadStringUntil(',').toInt();
-      int leftTurn = FlowSerialReadStringUntil('\n').toInt();
-
-      // Update blinker states based on incoming signals
-      updateBlinkerStates(leftTurn, rightTurn);
-
-      // Parse date/time and set clock
-      int hour = 12, minute = 0, ampm = 0;
-      parseDateTime(currentDateTime, hour, minute, ampm);
-      int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
-      VolvoDIM.setTime(timeValue);
-
-      // Update VolvoDIM gauges
-      VolvoDIM.setOutdoorTemp(oilTemp);
-      VolvoDIM.setCoolantTemp(waterTemp);
-      VolvoDIM.setSpeed(carSpeed);
-      VolvoDIM.setGasLevel(fuelPercent);
-      VolvoDIM.setRpm(rpms);
-      VolvoDIM.setGearPosText(gear.charAt(0));
-
-      // Handle all warning lights based on telemetry
-      VolvoDIM.engineServiceRequiredOrange(rpms > 7000 ? 1 : 0);
-      VolvoDIM.reducedBrakePerformanceOrange(brake > 80 ? 1 : 0);
-      VolvoDIM.fuelFillerCapLoose(fuelPercent < 10 ? 1 : 0);
-      VolvoDIM.engineSystemServiceUrgentRed(waterTemp > 220 ? 1 : 0);
-      VolvoDIM.brakePerformanceReducedRed(brake > 95 ? 1 : 0);
-      VolvoDIM.reducedEnginePerformanceRed(oilTemp > 250 ? 1 : 0);
-      VolvoDIM.slowDownOrShiftUpOrange(rpmShiftLight > 6500 ? 1 : 0);
-      VolvoDIM.reducedEnginePerformanceOrange(oilTemp > 220 ? 1 : 0);
-      VolvoDIM.enableTrailer(opponentsCount > 0 ? 1 : 0);
-
-      VolvoDIM.enableDisableDingNoise(gameVolume > 0 ? 0 : 0);
-
-      // Set brightness
+      delay(1000);
+      
+      // Set basic display values
       VolvoDIM.setTotalBrightness(255);
-      VolvoDIM.setOverheadBrightness(255);
-      VolvoDIM.setLcdBrightness(255);
+      VolvoDIM.setRpm(2000);
+      VolvoDIM.setSpeed(45);
+      VolvoDIM.setCoolantTemp(180);
+      VolvoDIM.setGasLevel(75);
+      VolvoDIM.setGearPosText('D');
+      
+      // Initialize timing
+      phaseStart = millis();
+      lastBlinkerUpdate = millis();
+      lastWarningUpdate = millis();
+      flags.leftActive = true;
+      
+      Serial.println(F("Ready. Type 'h' for help"));
     }
 
-    // Main loop method
     void loop() {
-      // ALWAYS call VolvoDIM.simulate() first
       VolvoDIM.simulate();
-
-      // Generate simulation data if enabled
-      if (simulationMode) {
-        generateSimulationData();
-      }
-
-      // Handle blinker timing - this creates the actual blinking effect
-      // unsigned long currentMillis = millis();
-      // if (currentMillis - previousBlinkMillis >= blinkInterval) {
-      //   previousBlinkMillis = currentMillis;
-
-      //   // Toggle blinker LED states if the blinker is active
-      //   if (leftBlinkerActive) {
-      //     leftBlinkerCurrentState = !leftBlinkerCurrentState;
-      //   } else {
-      //     leftBlinkerCurrentState = false;
-      //   }
-
-      //   if (rightBlinkerActive) {
-      //     rightBlinkerCurrentState = !rightBlinkerCurrentState;
-      //   } else {
-      //     rightBlinkerCurrentState = false;
-      //   }
-      // }
-
-      // // Always update hardware state with current LED states
-      // VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
-      // VolvoDIM.setRightBlinkerSolid(rightBlinkerCurrentState ? 1 : 0);
-
-      // Call simulate again to ensure updates are processed
-      VolvoDIM.simulate();
+      handleSerialCommands();
+      runTestSequence();
+      updateBlinkers();
+      handleWarningLights();
+      delay(10);
     }
 
-    // Control methods for simulation
-    void setSimulationMode(bool enable) {
-      simulationMode = enable;
-      simInitialized = false;
-      if (enable) {
-        simStartTime = millis();
-        Serial.println("Simulation mode enabled");
-      } else {
-        Serial.println("Simulation mode disabled");
-      }
-    }
-
-    bool isSimulationMode() {
-      return simulationMode;
-    }
-
-    // Method to manually test blinkers
-    void testBlinkers() {
-      Serial.println("=== Testing Blinkers ===");
-
-      // Test left blinker only
-      Serial.println("Testing LEFT blinker for 5 seconds...");
-      leftBlinkerActive = true;
-      rightBlinkerActive = false;
-      leftBlinkerCurrentState = true;
-      rightBlinkerCurrentState = false;
-
-      unsigned long testStart = millis();
-      while (millis() - testStart < 5000) {
-        loop(); // This will handle the blinking
-        delay(10);
-      }
-
-      // Test right blinker only
-      Serial.println("Testing RIGHT blinker for 5 seconds...");
-      leftBlinkerActive = false;
-      rightBlinkerActive = true;
-      leftBlinkerCurrentState = false;
-      rightBlinkerCurrentState = true;
-
-      testStart = millis();
-      while (millis() - testStart < 5000) {
-        loop(); // This will handle the blinking
-        delay(10);
-      }
-
-      // Test both blinkers
-      Serial.println("Testing BOTH blinkers for 5 seconds...");
-      leftBlinkerActive = true;
-      rightBlinkerActive = true;
-      leftBlinkerCurrentState = true;
-      rightBlinkerCurrentState = true;
-
-      testStart = millis();
-      while (millis() - testStart < 5000) {
-        loop(); // This will handle the blinking
-        delay(10);
-      }
-
-      // Turn off both
-      Serial.println("Turning off blinkers...");
-      leftBlinkerActive = false;
-      rightBlinkerActive = false;
-      leftBlinkerCurrentState = false;
-      rightBlinkerCurrentState = false;
-      VolvoDIM.setLeftBlinkerSolid(0);
-      VolvoDIM.setRightBlinkerSolid(0);
-      VolvoDIM.simulate();
-
-      Serial.println("=== Blinker Test Complete ===");
-    }
-
-    // Method to set test values
-    void setTestValues() {
-      Serial.println("Setting test values...");
-
-      VolvoDIM.setRpm(4000);
-      VolvoDIM.setSpeed(80);
-      VolvoDIM.setCoolantTemp(190);
-      VolvoDIM.setOutdoorTemp(210);
-      VolvoDIM.setGasLevel(50);
-      VolvoDIM.setGearPosText('4');
-
-      // Turn on some warning lights
-      VolvoDIM.engineServiceRequiredOrange(1);
-      VolvoDIM.fuelFillerCapLoose(1);
-      VolvoDIM.enableTrailer(1);
-
-      // Set time
-      VolvoDIM.setTime(VolvoDIM.clockToDecimal(2, 45, 1));
-
-      // Set brightness
-      VolvoDIM.setTotalBrightness(255);
-      VolvoDIM.setOverheadBrightness(255);
-      VolvoDIM.setLcdBrightness(255);
-
-      VolvoDIM.simulate();
-      Serial.println("Test values set");
-    }
-
-    void idle() {
-      VolvoDIM.simulate();
-    }
+    // Minimal compatibility methods
+    void read() { }
+    void idle() { VolvoDIM.simulate(); }
+    
+    // Simple setters
+    void setLeft(bool on) { flags.leftActive = on; flags.autoTestEnabled = false; }
+    void setRight(bool on) { flags.rightActive = on; flags.autoTestEnabled = false; }
+    void setTC(bool on) { flags.tcActive = on; flags.autoTestEnabled = false; }
+    void setABS(bool on) { flags.absActive = on; flags.autoTestEnabled = false; }
+    void setHighBeam(bool on) { flags.highBeamActive = on; flags.autoTestEnabled = false; }
 };
 
 #endif
-
