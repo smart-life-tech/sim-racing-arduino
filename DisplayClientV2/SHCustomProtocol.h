@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <VolvoDIM.h>
+#include <EEPROM.h>
 #include <mcp2515_can.h>
 #include <mcp_can.h>
 #include <SPI.h>
@@ -14,209 +15,321 @@ extern mcp2515_can CAN;
 
 class SHCustomProtocol
 {
-  private:
-    // Pack boolean variables into bit fields to save memory
-    struct {
-      bool leftActive : 1;
-      bool rightActive : 1;
-      bool tcActive : 1;
-      bool absActive : 1;
-      bool highBeamActive : 1;
-      bool tcState : 1;
-      bool absState : 1;
-      bool autoTestEnabled : 1;
-    } flags;
-    
-    // Use smaller data types
-    uint8_t testPhase;
-    uint16_t blinkerUpdateInterval;
-    uint16_t warningUpdateInterval;
-    uint16_t phaseDuration;
-    
-    // Timing variables
-    unsigned long lastBlinkerUpdate;
-    unsigned long lastWarningUpdate;
-    unsigned long phaseStart;
-    
-    // Custom CAN functions - simplified
-    void sendCANMessage(uint8_t canId, bool state) {
-      uint8_t data[8] = {0};
-      data[0] = state ? 0x01 : 0x00;
-      CAN.sendMsgBuf(canId, 1, 8, data);
+private:
+  bool engineOn = false;
+
+  // Blinker state variables
+  bool leftBlinkerActive = true;
+  bool rightBlinkerActive = true;
+  bool leftBlinkerCurrentState = false;  // Current LED state (on/off)
+  bool rightBlinkerCurrentState = false; // Current LED state (on/off)
+
+  // Consecutive signal counters
+  int leftConsecutiveCount = 0;
+  int rightConsecutiveCount = 0;
+  int lastLeftSignal = -1;
+  int lastRightSignal = -1;
+
+  // Timing for blinking
+  unsigned long previousBlinkMillis = 0;
+  const unsigned long blinkInterval = 500; // 500ms blink interval (faster for testing)
+
+  // Odometer variables
+  unsigned long lastOdometerValue = 0;
+  unsigned long storedOdometerValue = 0;
+  bool odometerEnabled = false;
+
+  // EEPROM addresses for storing odometer
+  const int EEPROM_ODOMETER_ADDR = 0;
+  const int EEPROM_MAGIC_ADDR = 4;
+  const unsigned long EEPROM_MAGIC = 0xDEADBEEF;
+
+  // Function to save odometer to EEPROM
+  void saveOdometerToEEPROM(unsigned long mileage)
+  {
+    EEPROM.put(EEPROM_ODOMETER_ADDR, mileage);
+    EEPROM.put(EEPROM_MAGIC_ADDR, EEPROM_MAGIC);
+  }
+
+  // Function to load odometer from EEPROM
+  unsigned long loadOdometerFromEEPROM()
+  {
+    unsigned long magic;
+    EEPROM.get(EEPROM_MAGIC_ADDR, magic);
+
+    if (magic == EEPROM_MAGIC)
+    {
+      unsigned long savedMileage;
+      EEPROM.get(EEPROM_ODOMETER_ADDR, savedMileage);
+      return savedMileage;
     }
-    
-    void updateBlinkers() {
-      unsigned long now = millis();
-      
-      if (now - lastBlinkerUpdate >= blinkerUpdateInterval) {
-        lastBlinkerUpdate = now;
-        
-        // Use VolvoDIM's built-in blinker system
-        VolvoDIM.setLeftBlinker(flags.leftActive ? 1 : 0);
-        VolvoDIM.setRightBlinker(flags.rightActive ? 1 : 0);
+    return 0;
+  }
+
+  // Function to parse date/time string and extract hour/minute/AM-PM
+  void parseDateTime(String dateTimeStr, int &hour, int &minute, int &ampm)
+  {
+    int spaceIndex = dateTimeStr.indexOf(' ');
+    if (spaceIndex == -1)
+      return;
+
+    String timeStr = dateTimeStr.substring(spaceIndex + 1);
+
+    ampm = 0;
+    if (timeStr.indexOf("PM") != -1)
+    {
+      ampm = 1;
+    }
+
+    int firstColon = timeStr.indexOf(':');
+    int secondColon = timeStr.indexOf(':', firstColon + 1);
+
+    if (firstColon != -1 && secondColon != -1)
+    {
+      hour = timeStr.substring(0, firstColon).toInt();
+      minute = timeStr.substring(firstColon + 1, secondColon).toInt();
+
+      if (hour == 0)
+      {
+        hour = 12;
+      }
+      else if (hour > 12)
+      {
+        hour = hour - 12;
+      }
+    }
+  }
+
+  // Handle blinker signals and update active states
+  void updateBlinkerStates(int leftSignal, int rightSignal)
+  {
+    // Handle left blinker
+    if (leftSignal == lastLeftSignal)
+    {
+      leftConsecutiveCount++;
+    }
+    else
+    {
+      leftConsecutiveCount = 1;
+      lastLeftSignal = leftSignal;
+
+      // Start blinking when signal goes to 1
+      if (leftSignal == 1)
+      {
+        leftBlinkerActive = true;
+        leftBlinkerCurrentState = true; // Start with LED on
       }
     }
 
-    void handleWarningLights() {
-      unsigned long now = millis();
-      
-      if (now - lastWarningUpdate >= warningUpdateInterval) {
-        lastWarningUpdate = now;
-        
-        // Toggle TC and ABS if active
-        if (flags.tcActive) {
-          flags.tcState = !flags.tcState;
-        } else {
-          flags.tcState = false;
-        }
-        
-        if (flags.absActive) {
-          flags.absState = !flags.absState;
-        } else {
-          flags.absState = false;
-        }
-        
-        // Send CAN messages
-        sendCANMessage(4, flags.tcState);    // TC
-        sendCANMessage(5, flags.absState);   // ABS
-        sendCANMessage(6, flags.highBeamActive); // High Beam
+    // Stop left blinker after 5 consecutive identical signals
+    if (leftConsecutiveCount >= 5)
+    {
+      leftBlinkerActive = false;
+      leftBlinkerCurrentState = false;
+      leftConsecutiveCount = 0;
+    }
+
+    // Handle right blinker
+    if (rightSignal == lastRightSignal)
+    {
+      rightConsecutiveCount++;
+    }
+    else
+    {
+      rightConsecutiveCount = 1;
+      lastRightSignal = rightSignal;
+
+      // Start blinking when signal goes to 1
+      if (rightSignal == 1)
+      {
+        rightBlinkerActive = true;
+        rightBlinkerCurrentState = true; // Start with LED on
       }
     }
 
-    void runTestSequence() {
-      if (!flags.autoTestEnabled) return;
-      
-      unsigned long now = millis();
-      
-      if (now - phaseStart >= phaseDuration) {
-        phaseStart = now;
-        testPhase = (testPhase + 1) % 8;
-        
-        // Reset all states
-        flags.leftActive = flags.rightActive = false;
-        flags.tcActive = flags.absActive = flags.highBeamActive = false;
-        
-        switch (testPhase) {
-          case 0: flags.leftActive = true; break;
-          case 1: flags.rightActive = true; break;
-          case 2: flags.leftActive = flags.rightActive = true; break;
-          case 3: flags.tcActive = true; break;
-          case 4: flags.absActive = true; break;
-          case 5: flags.highBeamActive = true; break;
-          case 6: 
-            flags.leftActive = flags.rightActive = true;
-            flags.tcActive = flags.absActive = flags.highBeamActive = true;
-            break;
-          case 7: break; // All off
-        }
+    // Stop right blinker after 5 consecutive identical signals
+    if (rightConsecutiveCount >= 5)
+    {
+      rightBlinkerActive = false;
+      rightBlinkerCurrentState = false;
+      rightConsecutiveCount = 0;
+    }
+  }
+
+  // Send custom CAN message
+  void sendCustomCANMessage(unsigned long canId, unsigned char *data, int dataLength = 8)
+  {
+    CAN.sendMsgBuf(canId, 1, dataLength, data);
+  }
+
+  // Custom odometer display function with EEPROM persistence
+  void setOdometer(unsigned long mileage)
+  {
+    if (!odometerEnabled)
+    {
+      return;
+    }
+
+    if (mileage == 0 || mileage < storedOdometerValue)
+    {
+      mileage = storedOdometerValue;
+    }
+
+    if (abs((long)(mileage - lastOdometerValue)) > 0)
+    {
+      lastOdometerValue = mileage;
+
+      if (mileage - storedOdometerValue >= 10 || mileage < storedOdometerValue)
+      {
+        storedOdometerValue = mileage;
+        saveOdometerToEEPROM(mileage);
       }
-    }
 
-    void handleSerialCommands() {
-      if (Serial.available()) {
-        char cmd = Serial.read();
-        
-        // Simple single character commands to save memory
-        switch (cmd) {
-          case '1': flags.leftActive = true; flags.autoTestEnabled = false; break;
-          case '2': flags.leftActive = false; break;
-          case '3': flags.rightActive = true; flags.autoTestEnabled = false; break;
-          case '4': flags.rightActive = false; break;
-          case '5': flags.tcActive = true; flags.autoTestEnabled = false; break;
-          case '6': flags.tcActive = false; break;
-          case '7': flags.absActive = true; flags.autoTestEnabled = false; break;
-          case '8': flags.absActive = false; break;
-          case '9': flags.highBeamActive = true; flags.autoTestEnabled = false; break;
-          case '0': flags.highBeamActive = false; break;
-          case 'a': flags.autoTestEnabled = true; break;
-          case 's': flags.autoTestEnabled = false; break;
-          case 'h': printHelp(); break;
-          case 'x': // All off
-            flags.leftActive = flags.rightActive = false;
-            flags.tcActive = flags.absActive = flags.highBeamActive = false;
-            break;
-        }
-        
-        // Clear remaining characters
-        while (Serial.available()) Serial.read();
-      }
-    }
+      unsigned long odometerCanId = 0x217FFC;
+      unsigned char odometerData[8] = {0x01, 0xEB, 0x00, 0xD8, 0xF0, 0x58, 0x00, 0x00};
 
-    void printHelp() {
-      // Use F() macro to store strings in flash memory instead of RAM
-      Serial.println(F("=== COMMANDS ==="));
-      Serial.println(F("1/2 - Left ON/OFF"));
-      Serial.println(F("3/4 - Right ON/OFF"));
-      Serial.println(F("5/6 - TC ON/OFF"));
-      Serial.println(F("7/8 - ABS ON/OFF"));
-      Serial.println(F("9/0 - HB ON/OFF"));
-      Serial.println(F("a/s - Auto ON/OFF"));
-      Serial.println(F("x - All OFF"));
-      Serial.println(F("h - Help"));
-    }
+      odometerData[7] = (mileage & 0xFF);
 
-  public:
-    void setup() {
-      Serial.begin(115200);
-      Serial.println(F("=== Blinker Test ==="));
-      
-      // Initialize bit field structure
-      flags.leftActive = false;
-      flags.rightActive = false;
-      flags.tcActive = false;
-      flags.absActive = false;
-      flags.highBeamActive = false;
-      flags.tcState = false;
-      flags.absState = false;
-      flags.autoTestEnabled = true;
-      
-      // Initialize variables
-      testPhase = 0;
-      blinkerUpdateInterval = 100;
-      warningUpdateInterval = 1000;
-      phaseDuration = 3000;
-      
-      VolvoDIM.gaugeReset();
-      delay(1000);
-      VolvoDIM.init();
-      delay(1000);
-      
-      // Set basic display values
-      VolvoDIM.setTotalBrightness(255);
-      VolvoDIM.setRpm(2000);
-      VolvoDIM.setSpeed(45);
-      VolvoDIM.setCoolantTemp(180);
-      VolvoDIM.setGasLevel(75);
-      VolvoDIM.setGearPosText('D');
-      
-      // Initialize timing
-      phaseStart = millis();
-      lastBlinkerUpdate = millis();
-      lastWarningUpdate = millis();
-      flags.leftActive = true;
-      
-      Serial.println(F("Ready. Type 'h' for help"));
-    }
-
-    void loop() {
-      VolvoDIM.simulate();
-      handleSerialCommands();
-      runTestSequence();
-      updateBlinkers();
-      handleWarningLights();
+      sendCustomCANMessage(odometerCanId, odometerData);
       delay(10);
     }
+  }
 
-    // Minimal compatibility methods
-    void read() { }
-    void idle() { VolvoDIM.simulate(); }
-    
-    // Simple setters
-    void setLeft(bool on) { flags.leftActive = on; flags.autoTestEnabled = false; }
-    void setRight(bool on) { flags.rightActive = on; flags.autoTestEnabled = false; }
-    void setTC(bool on) { flags.tcActive = on; flags.autoTestEnabled = false; }
-    void setABS(bool on) { flags.absActive = on; flags.autoTestEnabled = false; }
-    void setHighBeam(bool on) { flags.highBeamActive = on; flags.autoTestEnabled = false; }
+  // Enable/disable odometer display
+  void enableOdometer(bool enable)
+  {
+    odometerEnabled = enable;
+    if (enable)
+    {
+      storedOdometerValue = loadOdometerFromEEPROM();
+      lastOdometerValue = storedOdometerValue;
+    }
+  }
+
+  // Handle all warning lights based on telemetry data
+  void handleWarningLights(int rpms, int waterTemp, int oilTemp, int fuelPercent, int brake, int carSpeed, int opponentsCount, int rpmShiftLight)
+  {
+    VolvoDIM.engineServiceRequiredOrange(rpms > 7000 ? 1 : 0);
+    VolvoDIM.reducedBrakePerformanceOrange(brake > 80 ? 1 : 0);
+    VolvoDIM.fuelFillerCapLoose(fuelPercent < 10 ? 1 : 0);
+    VolvoDIM.engineSystemServiceUrgentRed(waterTemp > 220 ? 1 : 0);
+    VolvoDIM.brakePerformanceReducedRed(brake > 95 ? 1 : 0);
+    VolvoDIM.reducedEnginePerformanceRed(oilTemp > 250 ? 1 : 0);
+    VolvoDIM.slowDownOrShiftUpOrange(rpmShiftLight > 6500 ? 1 : 0);
+    VolvoDIM.reducedEnginePerformanceOrange(oilTemp > 220 ? 1 : 0);
+    VolvoDIM.enableTrailer(opponentsCount > 0 ? 1 : 0);
+  }
+
+public:
+  // Called when starting the arduino (setup method in main sketch)
+  void setup()
+  {
+    VolvoDIM.gaugeReset();
+    VolvoDIM.init();
+    VolvoDIM.enableSerialErrorMessages();
+    enableOdometer(true);
+
+    if (storedOdometerValue > 0)
+    {
+      setOdometer(storedOdometerValue);
+    }
+  }
+
+  // Called when new data is coming from computer - ONLY update states, no blinking logic
+  void read()
+  {
+    int waterTemp = floor(FlowSerialReadStringUntil(',').toInt() * .72);
+    int carSpeed = FlowSerialReadStringUntil(',').toInt();
+    int rpms = FlowSerialReadStringUntil(',').toInt();
+    int fuelPercent = FlowSerialReadStringUntil(',').toInt();
+    int oilTemp = FlowSerialReadStringUntil(',').toInt();
+    String gear = FlowSerialReadStringUntil(',');
+    String currentDateTime = FlowSerialReadStringUntil(',');
+    int sessionOdo = FlowSerialReadStringUntil(',').toInt();
+    int gameVolume = FlowSerialReadStringUntil(',').toInt();
+    int rpmShiftLight = FlowSerialReadStringUntil(',').toInt();
+    int brake = FlowSerialReadStringUntil(',').toInt();
+    int opponentsCount = FlowSerialReadStringUntil(',').toInt();
+    int rightTurn = FlowSerialReadStringUntil(',').toInt();
+    int leftTurn = FlowSerialReadStringUntil('\n').toInt();
+    unsigned long totalOdometer = sessionOdo;
+
+    // ONLY update blinker states based on incoming signals - NO blinking here
+    updateBlinkerStates(leftTurn, rightTurn);
+
+    // Parse date/time and set clock
+    int hour = 12, minute = 0, ampm = 0;
+    parseDateTime(currentDateTime, hour, minute, ampm);
+    int timeValue = VolvoDIM.clockToDecimal(hour, minute, ampm);
+    VolvoDIM.setTime(timeValue);
+    //rpms = map(rpms, 0, 8000, 0, 9000);
+    // Update VolvoDIM gauges
+    VolvoDIM.setOutdoorTemp(oilTemp);
+    VolvoDIM.setCoolantTemp(waterTemp);
+    VolvoDIM.setSpeed(carSpeed);
+    VolvoDIM.setGasLevel(fuelPercent);
+    VolvoDIM.setRpm(rpms);
+    VolvoDIM.setGearPosText(gear.charAt(0));
+
+    // Set persistent odometer display
+   // setOdometer(totalOdometer);
+    VolvoDIM.enableMilageTracking(1);
+    // VolvoDIM.setCustomText((String("Odo: ") + String(totalOdometer) + " km").c_str());
+    //  Handle all warning lights based on telemetry
+    handleWarningLights(rpms, waterTemp, oilTemp, fuelPercent, brake, carSpeed, opponentsCount, rpmShiftLight);
+
+    VolvoDIM.enableDisableDingNoise(gameVolume > 0 ? 0 : 0);
+
+    // Set brightness based on shift light
+    int brightness = map(rpmShiftLight, 0, 8000, 50, 256);
+    VolvoDIM.setTotalBrightness(255);
+    VolvoDIM.setOverheadBrightness(255);
+    VolvoDIM.setLcdBrightness(255);
+  }
+
+  // Called continuously - HANDLE ALL BLINKING LOGIC HERE
+  void loop()
+  {
+    VolvoDIM.simulate();
+
+    // Handle blinking timing continuously
+    unsigned long currentMillis = millis();
+
+    if (currentMillis - previousBlinkMillis >= blinkInterval)
+    {
+      previousBlinkMillis = currentMillis;
+
+      // Toggle blinker states ONLY if they're active
+      if (leftBlinkerActive)
+      {
+        leftBlinkerCurrentState = !leftBlinkerCurrentState;
+      }
+      else
+      {
+        leftBlinkerCurrentState = false;
+      }
+
+      if (rightBlinkerActive)
+      {
+        rightBlinkerCurrentState = !rightBlinkerCurrentState;
+      }
+      else
+      {
+        rightBlinkerCurrentState = false;
+      }
+    }
+
+    // ALWAYS update the hardware state (not just when toggling)
+    VolvoDIM.setLeftBlinkerSolid(1);
+    VolvoDIM.setRightBlinkerSolid(1);
+    VolvoDIM.setLeftBlinker(leftBlinkerCurrentState ? 1 : 0);
+    VolvoDIM.setRightBlinker(rightBlinkerCurrentState ? 1 : 0);
+
+  }
+
+  void idle()
+  {
+  }
 };
 
 #endif
