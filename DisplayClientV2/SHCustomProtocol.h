@@ -226,9 +226,12 @@ class SHCustomProtocol
     {
       VolvoDIM.gaugeReset();
       VolvoDIM.init();
+
       VolvoDIM.enableSerialErrorMessages();
       enableOdometer(true);
-
+      //VolvoDIM.set4CWarning(true);
+      //VolvoDIM.setSRSWarning(true);
+      
       if (storedOdometerValue > 0)
       {
         setOdometer(storedOdometerValue);
@@ -237,6 +240,8 @@ class SHCustomProtocol
       VolvoDIM.setRightBlinker(1);
       VolvoDIM.setABSWarning(true);
       VolvoDIM.setTCWarning(true);
+      const char* text = "Volvo DIM Custom Protocol";
+      VolvoDIM.setCustomText(text);
     }
 
     // Called when new data is coming from computer - ONLY update states, no blinking logic
@@ -324,12 +329,14 @@ class SHCustomProtocol
         FlowSerialPrintLn("Blinker states: " + String(leftBlinkerCurrentState) + ", " + String(rightBlinkerCurrentState));
         //VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
         //VolvoDIM.setRightBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
-       // VolvoDIM.setLeftBlinker(leftBlinkerCurrentState ? 1 : 1);
-       // VolvoDIM.setRightBlinker(rightBlinkerCurrentState ? 1 : 1);
+        // VolvoDIM.setLeftBlinker(leftBlinkerCurrentState ? 1 : 1);
+        // VolvoDIM.setRightBlinker(rightBlinkerCurrentState ? 1 : 1);
+        //VolvoDIM.set4CWarning(true);
+        VolvoDIM.setSRSWarning(true,0x1A0600A);
         VolvoDIM.simulate();
       }
 
-      
+
 
 
     }
