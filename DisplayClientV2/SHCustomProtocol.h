@@ -294,6 +294,8 @@ class SHCustomProtocol
       VolvoDIM.setTotalBrightness(255);
       VolvoDIM.setOverheadBrightness(255);
       VolvoDIM.setLcdBrightness(255);
+      VolvoDIM.setRightBlinker(rightTurn ? 1 : 0);
+      VolvoDIM.setLeftBlinker(leftTurn ? 1 : 0);
     }
 
     // Called continuously - HANDLE ALL BLINKING LOGIC HERE
@@ -332,6 +334,33 @@ class SHCustomProtocol
         // VolvoDIM.setLeftBlinker(leftBlinkerCurrentState ? 1 : 1);
         // VolvoDIM.setRightBlinker(rightBlinkerCurrentState ? 1 : 1);
         //VolvoDIM.set4CWarning(true);
+        // Direction lamp ON (extended ID)
+        uint8_t directionLamp[8]  = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x01, 0x00};
+        CAN.sendMsgBuf(0xFFFFE, 1, 8, directionLamp); // 1 = extended ID
+        Serial.println("Direction lamp command sent.");
+
+        delay(10);
+
+
+        // Fog lamp ON (extended ID)
+        uint8_t fogLamp[8]  = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x02, 0x00};
+        CAN.sendMsgBuf(0xFFFFE, 1, 8, fogLamp); // 1 = extended ID
+        Serial.println("Fog lamp command sent.");
+
+        delay(10);
+
+
+      // ABS lamp ON (extended ID)
+        uint8_t absLamp[8]  = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x04, 0x00};
+        CAN.sendMsgBuf(0xFFFFE, 1, 8, absLamp); // 1 = extended ID
+        Serial.println("ABS lamp command sent.");
+
+        delay(10);
+
+        // SPIN lamp ON (extended ID)
+        uint8_t spinLamp[8] = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x08, 0x00};
+        CAN.sendMsgBuf(0xFFFFE, 1, 8, spinLamp); // 1 = extended ID
+        Serial.println("SPIN lamp command sent.");
         VolvoDIM.setSRSWarning(true,0x1A0600A);
         VolvoDIM.simulate();
       }
