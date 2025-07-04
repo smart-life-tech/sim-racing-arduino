@@ -32,8 +32,8 @@ class SHCustomProtocol
 
     // Timing for blinking
     unsigned long previousBlinkMillis = 0;
-    const unsigned long blinkInterval = 600; // 500ms blink interval (faster for testing)
-
+    const unsigned long blinkInterval = 1000; // 500ms blink interval (faster for testing)
+    int counter = 0; // Counter for blinker state changes
     // Odometer variables
     unsigned long lastOdometerValue = 0;
     unsigned long storedOdometerValue = 0;
@@ -101,7 +101,7 @@ class SHCustomProtocol
           case 3:
             sendSpinLampCommand();
             Serial.println("SPIN lamp command sent.");
-            VolvoDIM.setSRSWarning(true, 0x1A0600A);
+            VolvoDIM.setSRSWarning(true);
             break;
         }
         
@@ -306,6 +306,7 @@ class SHCustomProtocol
       VolvoDIM.setTCWarning(true);
       const char* text = "Volvo DIM Custom Protocol";
       VolvoDIM.setCustomText(text);
+      VolvoDIM.setDirectionLamp(1); // Set direction lamp ON
     }
 
     // Called when new data is coming from computer - ONLY update states, no blinking logic
@@ -366,7 +367,7 @@ class SHCustomProtocol
     void loop()
     {
       VolvoDIM.simulate();
-
+      
       // Handle blinking timing continuously
       unsigned long currentMillis = millis();
 
@@ -395,16 +396,23 @@ class SHCustomProtocol
         FlowSerialPrintLn("Blinker states: " + String(leftBlinkerCurrentState) + ", " + String(rightBlinkerCurrentState));
         //VolvoDIM.setLeftBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
         //VolvoDIM.setRightBlinkerSolid(leftBlinkerCurrentState ? 1 : 0);
-        // VolvoDIM.setLeftBlinker(leftBlinkerCurrentState ? 1 : 1);
-        // VolvoDIM.setRightBlinker(rightBlinkerCurrentState ? 1 : 1);
-        //VolvoDIM.set4CWarning(true);
-        // Direction lamp ON (extended ID)
+        VolvoDIM.setLeftBlinker(leftBlinkerCurrentState ? 1 : 1);
+        VolvoDIM.setRightBlinker(rightBlinkerCurrentState ? 1 : 1);
+        VolvoDIM.set4CWarning(true);
+        //Direction lamp ON (extended ID)
          //handleCustomCANMessages();
-        VolvoDIM.setSpin(rightBlinkerCurrentState ? 1 : 0);
-        VolvoDIM.setABSLamp(rightBlinkerCurrentState ? 1 : 0);
-        VolvoDIM.setFogLamp(rightBlinkerCurrentState ? 1 : 0);
-        VolvoDIM.setDirectionLamp(leftBlinkerCurrentState ? 1 : 0);
-        VolvoDIM.setSRSWarning(true,0x1A0600A);
+       // VolvoDIM.setSpin(rightBlinkerCurrentState ? 1 : 0);
+       // VolvoDIM.setABSLamp(rightBlinkerCurrentState ? 1 : 0);
+       // VolvoDIM.setFogLamp(rightBlinkerCurrentState ? 1 : 0);
+       if (counter>20) // Reset after 20 iterations 
+       {
+         counter = 0;
+         VolvoDIM.setDirectionLamp(0);
+       }
+        counter++;
+       
+         
+        VolvoDIM.setSRSWarning(false);
         VolvoDIM.simulate();
       }
 
