@@ -43,7 +43,71 @@ class SHCustomProtocol
     const int EEPROM_ODOMETER_ADDR = 0;
     const int EEPROM_MAGIC_ADDR = 4;
     const unsigned long EEPROM_MAGIC = 0xDEADBEEF;
-
+    // Add timing variables for custom CAN messages
+    unsigned long lastCustomCANMillis = 0;
+    const unsigned long customCANInterval = 1000; // Send every 1 second
+    int customCANStep = 0; // Track which message to send
+    void sendDirectionLampCommand()
+    {
+      uint8_t directionLamp[8] = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x01, 0x00};
+      CAN.sendMsgBuf(0xFFFFE, 1, 8, directionLamp);
+    }
+    
+    // Function to send fog lamp command
+    void sendFogLampCommand()
+    {
+      uint8_t fogLamp[8] = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x02, 0x00};
+      CAN.sendMsgBuf(0xFFFFE, 1, 8, fogLamp);
+    }
+    
+    // Function to send ABS lamp command
+    void sendABSLampCommand()
+    {
+      uint8_t absLamp[8] = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x04, 0x00};
+      CAN.sendMsgBuf(0xFFFFE, 1, 8, absLamp);
+    }
+    
+    // Function to send SPIN lamp command
+    void sendSpinLampCommand()
+    {
+      uint8_t spinLamp[8] = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x08, 0x00};
+      CAN.sendMsgBuf(0xFFFFE, 1, 8, spinLamp);
+    }
+     // Function to handle all custom CAN messages with proper timing
+    void handleCustomCANMessages()
+    {
+      unsigned long currentMillis = millis();
+      
+      // Only send messages at specified intervals
+      if (currentMillis - lastCustomCANMillis >= customCANInterval)
+      {
+        lastCustomCANMillis = currentMillis;
+        
+        // Send messages in sequence to avoid flooding
+        switch (customCANStep)
+        {
+          case 0:
+            sendDirectionLampCommand();
+            Serial.println("Direction lamp command sent.");
+            break;
+          case 1:
+            sendFogLampCommand();
+            Serial.println("Fog lamp command sent.");
+            break;
+          case 2:
+            sendABSLampCommand();
+            Serial.println("ABS lamp command sent.");
+            break;
+          case 3:
+            sendSpinLampCommand();
+            Serial.println("SPIN lamp command sent.");
+            VolvoDIM.setSRSWarning(true, 0x1A0600A);
+            break;
+        }
+        
+        customCANStep = (customCANStep + 1) % 4; // Cycle through 0-3
+      }
+    }
     // Function to save odometer to EEPROM
     void saveOdometerToEEPROM(unsigned long mileage)
     {
@@ -335,38 +399,14 @@ class SHCustomProtocol
         // VolvoDIM.setRightBlinker(rightBlinkerCurrentState ? 1 : 1);
         //VolvoDIM.set4CWarning(true);
         // Direction lamp ON (extended ID)
-        uint8_t directionLamp[8]  = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x01, 0x00};
-        CAN.sendMsgBuf(0xFFFFE, 1, 8, directionLamp); // 1 = extended ID
-        Serial.println("Direction lamp command sent.");
-
-        delay(10);
-
-
-        // Fog lamp ON (extended ID)
-        uint8_t fogLamp[8]  = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x02, 0x00};
-        CAN.sendMsgBuf(0xFFFFE, 1, 8, fogLamp); // 1 = extended ID
-        Serial.println("Fog lamp command sent.");
-
-        delay(10);
-
-
-      // ABS lamp ON (extended ID)
-        uint8_t absLamp[8]  = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x04, 0x00};
-        CAN.sendMsgBuf(0xFFFFE, 1, 8, absLamp); // 1 = extended ID
-        Serial.println("ABS lamp command sent.");
-
-        delay(10);
-
-        // SPIN lamp ON (extended ID)
-        uint8_t spinLamp[8] = {0xCE, 0x51, 0xB0, 0x09, 0x01, 0xFF, 0x08, 0x00};
-        CAN.sendMsgBuf(0xFFFFE, 1, 8, spinLamp); // 1 = extended ID
-        Serial.println("SPIN lamp command sent.");
+         //handleCustomCANMessages();
+        VolvoDIM.setSpin(rightBlinkerCurrentState ? 1 : 0);
+        VolvoDIM.setABSLamp(rightBlinkerCurrentState ? 1 : 0);
+        VolvoDIM.setFogLamp(rightBlinkerCurrentState ? 1 : 0);
+        VolvoDIM.setDirectionLamp(leftBlinkerCurrentState ? 1 : 0);
         VolvoDIM.setSRSWarning(true,0x1A0600A);
         VolvoDIM.simulate();
       }
-
-
-
 
     }
 
